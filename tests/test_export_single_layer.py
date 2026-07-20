@@ -1,28 +1,26 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-import nbtlib
 import mcschematic
+import nbtlib
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
-from mcnn.discrete import DiscreteLayer, DiscreteMCNN  # noqa: E402
-from mcnn.export import (  # noqa: E402
-    MAX_BIAS_SIGNAL_STRENGTH,
-    SchematicExportConfig,
-    build_module_atlas,
-    build_schematic,
+from mcnn.discrete import DiscreteLayer, DiscreteMCNN
+from mcnn.encoding import (
     comparator_subtractions,
     encode_comparator_weight,
-    export_plan_from_discrete,
+)
+from mcnn.export import (
+    MAX_BIAS_SIGNAL_STRENGTH,
+    SchematicExportConfig,
+    _wire,
+    build_module_atlas,
+    build_schematic,
     is_representable_bias_signal,
     save_module_atlas,
     save_schematic,
@@ -32,43 +30,73 @@ from mcnn.export import (  # noqa: E402
 
 
 def minecraft_outputs(model: DiscreteMCNN, inputs: torch.Tensor) -> torch.Tensor:
-    plan = export_plan_from_discrete(model)
     x = inputs.to(torch.float32)
-    for layer_index, layer in enumerate(plan.layers):
+    for layer_index, layer in enumerate(model.layers):
         outputs = []
         for row in x.to(torch.int16):
             layer_outputs = []
-            for neuron in layer.neurons:
-                subtracted = sum(
-                    connection.active_subtraction
-                    if int(row[connection.input_index].item())
-                    else connection.inactive_subtraction
-                    for connection in neuron.connections
+            for output_index in range(layer.weight.shape[0]):
+                physical_bias = int(layer.bias[output_index].item()) + sum(
+                    comparator_subtractions(
+                        int(layer.weight[output_index, input_index].item())
+                    ).inactive
+                    for input_index in range(layer.weight.shape[1])
                 )
-                layer_outputs.append(neuron.physical_bias - subtracted)
+                subtracted = sum(
+                    comparator_subtractions(
+                        int(layer.weight[output_index, input_index].item())
+                    ).active
+                    if int(row[input_index].item())
+                    else comparator_subtractions(
+                        int(layer.weight[output_index, input_index].item())
+                    ).inactive
+                    for input_index in range(layer.weight.shape[1])
+                )
+                layer_outputs.append(physical_bias - subtracted)
             outputs.append(layer_outputs)
-        discrete_layer = model.layers[layer_index]
-        x = torch.tensor(outputs, dtype=torch.float32).round().clamp(discrete_layer.output_min, discrete_layer.output_max)
+        x = (
+            torch.tensor(outputs, dtype=torch.float32)
+            .round()
+            .clamp(layer.output_min, layer.output_max)
+        )
     return x
 
 
 def minecraft_layer_outputs(model: DiscreteMCNN, inputs: torch.Tensor) -> torch.Tensor:
-    plan = export_plan_from_discrete(model)
+    layer = model.layers[0]
     outputs = []
     for x in inputs.to(torch.int16):
         layer_outputs = []
-        for neuron in plan.layers[0].neurons:
-            subtracted = sum(
-                connection.active_subtraction if int(x[connection.input_index].item()) else connection.inactive_subtraction
-                for connection in neuron.connections
+        for output_index in range(layer.weight.shape[0]):
+            physical_bias = int(layer.bias[output_index].item()) + sum(
+                comparator_subtractions(
+                    int(layer.weight[output_index, input_index].item())
+                ).inactive
+                for input_index in range(layer.weight.shape[1])
             )
-            layer_outputs.append(neuron.physical_bias - subtracted)
+            subtracted = sum(
+                comparator_subtractions(
+                    int(layer.weight[output_index, input_index].item())
+                ).active
+                if int(x[input_index].item())
+                else comparator_subtractions(
+                    int(layer.weight[output_index, input_index].item())
+                ).inactive
+                for input_index in range(layer.weight.shape[1])
+            )
+            layer_outputs.append(physical_bias - subtracted)
         outputs.append(layer_outputs)
     layer = model.layers[0]
-    return torch.tensor(outputs, dtype=torch.float32).round().clamp(layer.output_min, layer.output_max)
+    return (
+        torch.tensor(outputs, dtype=torch.float32)
+        .round()
+        .clamp(layer.output_min, layer.output_max)
+    )
 
 
-def load_sponge_schematic(path: Path) -> tuple[tuple[int, int, int], dict[tuple[int, int, int], str]]:
+def load_sponge_schematic(
+    path: Path,
+) -> tuple[tuple[int, int, int], dict[tuple[int, int, int], str]]:
     base = nbtlib.load(path, gzipped=True)["Schematic"]
     width = int(base["Width"])
     height = int(base["Height"])
@@ -98,10 +126,16 @@ class SingleLayerExportTest(unittest.TestCase):
             for z in range(-2, 16)
             if atlas.getBlockStateAt((x, y, z)) != "minecraft:air"
         ]
-        max_corner = tuple(max(position[index] for position in occupied) for index in range(3))
+        max_corner = tuple(
+            max(position[index] for position in occupied) for index in range(3)
+        )
         self.assertEqual(atlas.getBlockStateAt(max_corner), "minecraft:stone")
 
-        stone_positions = [position for position in occupied if atlas.getBlockStateAt(position) == "minecraft:stone"]
+        stone_positions = [
+            position
+            for position in occupied
+            if atlas.getBlockStateAt(position) == "minecraft:stone"
+        ]
         self.assertEqual(sorted(stone_positions), [(0, 0, 0), max_corner])
         self.assertGreaterEqual(
             sum(
@@ -136,22 +170,37 @@ class SingleLayerExportTest(unittest.TestCase):
             ]
         )
 
-        plan = export_plan_from_discrete(model)
-        layer = plan.layers[0]
-        neuron = layer.neurons[0]
+        layer = model.layers[0]
 
-        self.assertEqual(plan.layer_sizes, (3, 1))
-        self.assertEqual(layer.input_size, 3)
-        self.assertEqual(layer.output_size, 1)
-        self.assertEqual(neuron.effective_bias, 7)
-        self.assertEqual(neuron.physical_bias, 7 + 15 + 11)
-        self.assertEqual(
-            [(connection.input_index, connection.encoding.mode, connection.encoding.value) for connection in neuron.connections],
-            [(0, "A", 10), (1, "B", 11), (2, "C", 0)],
+        self.assertEqual(model.layer_sizes(), [3, 1])
+        self.assertEqual(layer.weight.shape[1], 3)
+        self.assertEqual(layer.weight.shape[0], 1)
+        self.assertEqual(int(layer.bias[0].item()), 7)
+
+        # Verify comparator encodings
+        encodings = [
+            (
+                input_index,
+                encode_comparator_weight(int(layer.weight[0, input_index].item())).mode,
+                encode_comparator_weight(
+                    int(layer.weight[0, input_index].item())
+                ).value,
+            )
+            for input_index in range(3)
+        ]
+        self.assertEqual(encodings, [(0, "A", 10), (1, "B", 11), (2, "C", 0)])
+
+        # Verify physical bias: effective_bias + sum of inactive subtractions
+        physical_bias = int(layer.bias[0].item()) + sum(
+            comparator_subtractions(int(layer.weight[0, input_index].item())).inactive
+            for input_index in range(3)
         )
+        self.assertEqual(physical_bias, 7 + 15 + 11)
 
-        schematic = build_schematic(plan)
-        (width, height, length), correct_blocks = load_sponge_schematic(ROOT / "artifacts" / "correct.schem")
+        schematic = build_schematic(model)
+        (width, height, length), correct_blocks = load_sponge_schematic(
+            ROOT / "artifacts" / "correct.schem"
+        )
         for position in ((1, 0, 2), (3, 0, 2)):
             correct_blocks.pop(position)
         correct_blocks[(0, 1, 0)] = "minecraft:barrel"
@@ -168,27 +217,47 @@ class SingleLayerExportTest(unittest.TestCase):
             if schematic.getBlockStateAt((x, y, z)) != "minecraft:air"
         }
         self.assertEqual(generated_blocks, correct_blocks)
-        self.assertEqual(schematic.getBlockDataAt((0, 1, 0)), signal_strength_barrel(33))
-        self.assertEqual(schematic.getBlockDataAt((1, 1, 3)), signal_strength_furnace(10))
-        self.assertEqual(schematic.getBlockDataAt((3, 1, 3)), signal_strength_furnace(11))
+        self.assertEqual(
+            schematic.getBlockDataAt((0, 1, 0)), signal_strength_barrel(33)
+        )
+        self.assertEqual(
+            schematic.getBlockDataAt((1, 1, 3)), signal_strength_furnace(10)
+        )
+        self.assertEqual(
+            schematic.getBlockDataAt((3, 1, 3)), signal_strength_furnace(11)
+        )
         self.assertIn('id:"minecraft:water_bucket"', signal_strength_barrel(33))
         self.assertIn('id:"minecraft:water_bucket"', signal_strength_barrel(777))
         self.assertTrue(is_representable_bias_signal(777))
         self.assertTrue(is_representable_bias_signal(MAX_BIAS_SIGNAL_STRENGTH))
-        self.assertTrue(all(is_representable_bias_signal(signal) for signal in range(MAX_BIAS_SIGNAL_STRENGTH + 1)))
+        self.assertTrue(
+            all(
+                is_representable_bias_signal(signal)
+                for signal in range(MAX_BIAS_SIGNAL_STRENGTH + 1)
+            )
+        )
         with self.assertRaises(ValueError):
             signal_strength_furnace(-1)
         with self.assertRaises(ValueError):
             signal_strength_barrel(MAX_BIAS_SIGNAL_STRENGTH + 1)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = save_schematic(plan, Path(tmpdir) / "single_layer_abc.schem")
+            output_path = save_schematic(model, Path(tmpdir) / "single_layer_abc.schem")
             self.assertTrue(output_path.exists())
 
     def test_weight_encoding_excludes_zero_signal_furnaces(self) -> None:
-        self.assertEqual((encode_comparator_weight(14).mode, encode_comparator_weight(14).value), ("A", 1))
-        self.assertEqual((encode_comparator_weight(-14).mode, encode_comparator_weight(-14).value), ("B", 1))
-        self.assertEqual((encode_comparator_weight(0).mode, encode_comparator_weight(0).value), ("C", 0))
+        self.assertEqual(
+            (encode_comparator_weight(14).mode, encode_comparator_weight(14).value),
+            ("A", 1),
+        )
+        self.assertEqual(
+            (encode_comparator_weight(-14).mode, encode_comparator_weight(-14).value),
+            ("B", 1),
+        )
+        self.assertEqual(
+            (encode_comparator_weight(0).mode, encode_comparator_weight(0).value),
+            ("C", 0),
+        )
         self.assertEqual(comparator_subtractions(14).inactive, 15)
         self.assertEqual(comparator_subtractions(14).active, 1)
         self.assertEqual(comparator_subtractions(0).inactive, 0)
@@ -233,10 +302,14 @@ class SingleLayerExportTest(unittest.TestCase):
             dtype=torch.float32,
         )
 
-        self.assertTrue(torch.equal(minecraft_layer_outputs(model, inputs), model.forward(inputs)))
+        self.assertTrue(
+            torch.equal(minecraft_layer_outputs(model, inputs), model.forward(inputs))
+        )
         self.assertEqual(model.physical_biases(), [46, 76, 77, 74, 16])
 
-    def test_multilayer_export_plan_matches_discrete_model_for_binary_inputs(self) -> None:
+    def test_multilayer_export_plan_matches_discrete_model_for_binary_inputs(
+        self,
+    ) -> None:
         model = DiscreteMCNN(
             [
                 DiscreteLayer(
@@ -275,7 +348,9 @@ class SingleLayerExportTest(unittest.TestCase):
             dtype=torch.float32,
         )
 
-        self.assertTrue(torch.equal(minecraft_outputs(model, inputs), model.forward(inputs)))
+        self.assertTrue(
+            torch.equal(minecraft_outputs(model, inputs), model.forward(inputs))
+        )
         self.assertEqual(model.physical_biases(), [15, 15, 15, 30, 16, 16, 28, 18, 59])
 
     def test_discrete_binary_step_hidden_layers_use_positive_threshold(self) -> None:
@@ -298,7 +373,9 @@ class SingleLayerExportTest(unittest.TestCase):
         )
         inputs = torch.tensor([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=torch.float32)
 
-        self.assertEqual(model.forward(inputs).to(torch.int16).tolist(), [[2], [7], [0], [2]])
+        self.assertEqual(
+            model.forward(inputs).to(torch.int16).tolist(), [[2], [7], [0], [2]]
+        )
         state = model.state_dict()
         self.assertEqual(state["layers"][0]["activation"], "binary_step")
 
@@ -316,7 +393,7 @@ class SingleLayerExportTest(unittest.TestCase):
 
         self.assertGreater(model.max_physical_bias(), MAX_BIAS_SIGNAL_STRENGTH)
         with self.assertRaises(ValueError):
-            export_plan_from_discrete(model)
+            build_schematic(model)
 
     def test_next_layer_bias_continues_diagonal_grid(self) -> None:
         model = DiscreteMCNN(
@@ -336,20 +413,30 @@ class SingleLayerExportTest(unittest.TestCase):
             ]
         )
 
-        schematic = build_schematic(export_plan_from_discrete(model))
+        schematic = build_schematic(model)
 
         self.assertEqual(schematic.getBlockStateAt((0, 1, 0)), "minecraft:barrel")
-        self.assertEqual(schematic.getBlockDataAt((0, 1, 0)), signal_strength_barrel(18))
+        self.assertEqual(
+            schematic.getBlockDataAt((0, 1, 0)), signal_strength_barrel(18)
+        )
         for pos, signal, west_block in (
-            ((4, 1, 0), 5, "minecraft:comparator[facing=west,mode=subtract,powered=false]"),
+            (
+                (4, 1, 0),
+                5,
+                "minecraft:comparator[facing=west,mode=subtract,powered=false]",
+            ),
             ((5, 2, 0), 21, "minecraft:air"),
         ):
             self.assertEqual(schematic.getBlockStateAt(pos), "minecraft:barrel")
-            self.assertEqual(schematic.getBlockDataAt(pos), signal_strength_barrel(signal))
-            self.assertEqual(schematic.getBlockStateAt((pos[0] - 1, pos[1], pos[2])), west_block)
+            self.assertEqual(
+                schematic.getBlockDataAt(pos), signal_strength_barrel(signal)
+            )
+            self.assertEqual(
+                schematic.getBlockStateAt((pos[0] - 1, pos[1], pos[2])), west_block
+            )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = save_schematic(export_plan_from_discrete(model), Path(tmpdir) / "two_layer.schem")
+            output_path = save_schematic(model, Path(tmpdir) / "two_layer.schem")
             saved = mcschematic.MCSchematic(str(output_path))
 
         self.assertEqual(saved.getBlockStateAt((0, 1, 0)), "minecraft:barrel")
@@ -367,24 +454,35 @@ class SingleLayerExportTest(unittest.TestCase):
                 )
             ]
         )
-        plan = export_plan_from_discrete(model)
 
         weights_only = build_schematic(
-            plan,
-            SchematicExportConfig(emit_weights=True, emit_subtraction=False, emit_input_wiring=False),
+            model,
+            SchematicExportConfig(
+                emit_weights=True, emit_subtraction=False, emit_input_wiring=False
+            ),
         )
         self.assertEqual(weights_only.getBlockStateAt((0, 1, 0)), "minecraft:barrel")
-        self.assertEqual(weights_only.getBlockStateAt((1, 1, 2)), "minecraft:light_gray_concrete")
+        self.assertEqual(
+            weights_only.getBlockStateAt((1, 1, 2)), "minecraft:light_gray_concrete"
+        )
         self.assertEqual(weights_only.getBlockStateAt((1, 1, 3)), "minecraft:furnace")
         self.assertEqual(weights_only.getBlockStateAt((1, 1, 0)), "minecraft:air")
 
         subtraction_only = build_schematic(
-            plan,
-            SchematicExportConfig(emit_weights=False, emit_subtraction=True, emit_input_wiring=False),
+            model,
+            SchematicExportConfig(
+                emit_weights=False, emit_subtraction=True, emit_input_wiring=False
+            ),
         )
-        self.assertEqual(subtraction_only.getBlockStateAt((0, 1, 0)), "minecraft:magenta_concrete")
-        self.assertEqual(subtraction_only.getBlockStateAt((1, 1, 2)), "minecraft:light_gray_concrete")
-        self.assertEqual(subtraction_only.getBlockStateAt((1, 1, 3)), "minecraft:purple_concrete")
+        self.assertEqual(
+            subtraction_only.getBlockStateAt((0, 1, 0)), "minecraft:magenta_concrete"
+        )
+        self.assertEqual(
+            subtraction_only.getBlockStateAt((1, 1, 2)), "minecraft:light_gray_concrete"
+        )
+        self.assertEqual(
+            subtraction_only.getBlockStateAt((1, 1, 3)), "minecraft:purple_concrete"
+        )
         self.assertEqual(
             subtraction_only.getBlockStateAt((1, 1, 0)),
             "minecraft:comparator[facing=west,mode=subtract,powered=false]",
@@ -401,13 +499,19 @@ class SingleLayerExportTest(unittest.TestCase):
             ]
         )
         wiring_only = build_schematic(
-            export_plan_from_discrete(wiring_model),
-            SchematicExportConfig(emit_weights=False, emit_subtraction=False, emit_input_wiring=True),
+            wiring_model,
+            SchematicExportConfig(
+                emit_weights=False, emit_subtraction=False, emit_input_wiring=True
+            ),
         )
         for pos in ((1, 2, 4), (3, 2, 4), (5, 2, 4), (7, 2, 4)):
-            self.assertEqual(wiring_only.getBlockStateAt(pos), "minecraft:target[power=0]")
+            self.assertEqual(
+                wiring_only.getBlockStateAt(pos), "minecraft:target[power=0]"
+            )
         for pos in ((0, 1, 4), (2, 1, 4), (4, 1, 4), (6, 1, 4)):
-            self.assertEqual(wiring_only.getBlockStateAt(pos), "minecraft:target[power=0]")
+            self.assertEqual(
+                wiring_only.getBlockStateAt(pos), "minecraft:target[power=0]"
+            )
         self.assertEqual(
             wiring_only.getBlockStateAt((1, 1, 5)),
             "minecraft:smooth_stone_slab[type=top,waterlogged=false]",
@@ -418,7 +522,7 @@ class SingleLayerExportTest(unittest.TestCase):
         )
         self.assertEqual(
             wiring_only.getBlockStateAt((15, 16, 6)),
-            "minecraft:redstone_wire[east=none,north=side,power=1,south=side,west=side]",
+            _wire(power=1, north="side", south="side", west="side"),
         )
         self.assertEqual(
             wiring_only.getBlockStateAt((17, 16, 6)),
@@ -428,18 +532,22 @@ class SingleLayerExportTest(unittest.TestCase):
             wiring_only.getBlockStateAt((17, 15, 6)),
             "minecraft:smooth_stone_slab[type=top,waterlogged=false]",
         )
-        self.assertEqual(wiring_only.getBlockStateAt((15, 15, 7)), "minecraft:black_concrete")
+        self.assertEqual(
+            wiring_only.getBlockStateAt((15, 15, 7)), "minecraft:black_concrete"
+        )
         self.assertEqual(
             wiring_only.getBlockStateAt((18, 17, 6)),
             "minecraft:repeater[delay=1,facing=south,locked=false,powered=true]",
         )
-        self.assertEqual(wiring_only.getBlockStateAt((17, 17, 5)), "minecraft:white_concrete")
+        self.assertEqual(
+            wiring_only.getBlockStateAt((17, 17, 5)), "minecraft:white_concrete"
+        )
         self.assertEqual(wiring_only.getBlockStateAt((18, 18, 7)), "minecraft:air")
         self.assertEqual(wiring_only.getBlockStateAt((16, 18, 8)), "minecraft:air")
         self.assertEqual(wiring_only.getBlockStateAt((0, 1, 0)), "minecraft:air")
 
         output_wiring_only = build_schematic(
-            export_plan_from_discrete(wiring_model),
+            wiring_model,
             SchematicExportConfig(
                 emit_weights=False,
                 emit_subtraction=False,
@@ -461,11 +569,11 @@ class SingleLayerExportTest(unittest.TestCase):
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((8, 1, -3)),
-            "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]",
+            _wire(east="side", south="side"),
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((8, 1, -1)),
-            "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]",
+            _wire(north="side", south="side"),
         )
         self.assertEqual(output_wiring_only.getBlockStateAt((7, 1, 0)), "minecraft:air")
         self.assertEqual(
@@ -474,11 +582,11 @@ class SingleLayerExportTest(unittest.TestCase):
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((9, 0, -3)),
-            "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]",
+            _wire(east="side", west="up"),
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((11, 0, -2)),
-            "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]",
+            _wire(east="side", west="up"),
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((41, 0, -3)),
@@ -494,25 +602,37 @@ class SingleLayerExportTest(unittest.TestCase):
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((24, 15, -2)),
-            "minecraft:redstone_wire[east=none,north=side,power=0,south=none,west=up]",
+            _wire(north="side", west="up"),
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((24, 15, -4)),
-            "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]",
+            _wire(east="side", south="side"),
         )
         self.assertEqual(
             output_wiring_only.getBlockStateAt((25, 13, -4)),
             "minecraft:light_gray_concrete",
         )
-        self.assertEqual(output_wiring_only.getBlockStateAt((23, 15, -5)), "minecraft:air")
-        self.assertEqual(output_wiring_only.getBlockStateAt((25, 15, -4)), "minecraft:air")
-        self.assertEqual(output_wiring_only.getBlockStateAt((23, 15, -3)), "minecraft:light_gray_concrete")
-        self.assertEqual(output_wiring_only.getBlockStateAt((25, 15, -2)), "minecraft:light_gray_concrete")
+        self.assertEqual(
+            output_wiring_only.getBlockStateAt((23, 15, -5)), "minecraft:air"
+        )
+        self.assertEqual(
+            output_wiring_only.getBlockStateAt((25, 15, -4)), "minecraft:air"
+        )
+        self.assertEqual(
+            output_wiring_only.getBlockStateAt((23, 15, -3)),
+            "minecraft:light_gray_concrete",
+        )
+        self.assertEqual(
+            output_wiring_only.getBlockStateAt((25, 15, -2)),
+            "minecraft:light_gray_concrete",
+        )
         floor_redstone_count = sum(
             1
             for x in range(80)
             for z in range(-6, 1)
-            if output_wiring_only.getBlockStateAt((x, 0, z)).startswith("minecraft:redstone_wire")
+            if output_wiring_only.getBlockStateAt((x, 0, z)).startswith(
+                "minecraft:redstone_wire"
+            )
         )
         self.assertEqual(floor_redstone_count, 16)
         output_repeater_count = sum(
@@ -558,7 +678,8 @@ class SingleLayerExportTest(unittest.TestCase):
             for x in range(80)
             for y in range(20)
             for z in range(-6, 1)
-            if output_wiring_only.getBlockStateAt((x, y, z)) == "minecraft:light_gray_concrete"
+            if output_wiring_only.getBlockStateAt((x, y, z))
+            == "minecraft:light_gray_concrete"
         )
         self.assertEqual(output_gray_count, 9)
         self.assertEqual(
@@ -572,22 +693,28 @@ class SingleLayerExportTest(unittest.TestCase):
             ),
             10,
         )
-        for position in ((22, 15, -1), (26, 15, -3), (27, 15, -2), (30, 15, -3), (32, 15, -1)):
-            self.assertEqual(output_wiring_only.getBlockStateAt(position), "minecraft:air")
+        for position in (
+            (22, 15, -1),
+            (26, 15, -3),
+            (27, 15, -2),
+            (30, 15, -3),
+            (32, 15, -1),
+        ):
+            self.assertEqual(
+                output_wiring_only.getBlockStateAt(position), "minecraft:air"
+            )
         self.assertEqual(output_wiring_only.getBlockStateAt((0, 1, 0)), "minecraft:air")
 
         tall_output_wiring = build_schematic(
-            export_plan_from_discrete(
-                DiscreteMCNN(
-                    [
-                        DiscreteLayer(
-                            weight=torch.zeros((40, 4), dtype=torch.int16),
-                            bias=torch.zeros(40, dtype=torch.int16),
-                            output_min=0,
-                            output_max=15,
-                        )
-                    ]
-                )
+            DiscreteMCNN(
+                [
+                    DiscreteLayer(
+                        weight=torch.zeros((40, 4), dtype=torch.int16),
+                        bias=torch.zeros(40, dtype=torch.int16),
+                        output_min=0,
+                        output_max=15,
+                    )
+                ]
             ),
             SchematicExportConfig(
                 emit_weights=False,
@@ -596,32 +723,36 @@ class SingleLayerExportTest(unittest.TestCase):
                 emit_output_wiring=True,
             ),
         )
-        self.assertEqual(tall_output_wiring.getBlockStateAt((38, 30, -3)), "minecraft:black_concrete")
-        self.assertEqual(tall_output_wiring.getBlockStateAt((40, 30, -2)), "minecraft:white_concrete")
-        self.assertEqual(tall_output_wiring.getBlockStateAt((42, 30, -3)), "minecraft:black_concrete")
+        self.assertEqual(
+            tall_output_wiring.getBlockStateAt((38, 30, -3)), "minecraft:black_concrete"
+        )
+        self.assertEqual(
+            tall_output_wiring.getBlockStateAt((40, 30, -2)), "minecraft:white_concrete"
+        )
+        self.assertEqual(
+            tall_output_wiring.getBlockStateAt((42, 30, -3)), "minecraft:black_concrete"
+        )
         self.assertEqual(
             tall_output_wiring.getBlockStateAt((42, 28, -3)),
             "minecraft:smooth_stone_slab[type=top,waterlogged=false]",
         )
 
         odd_input_network_wiring = build_schematic(
-            export_plan_from_discrete(
-                DiscreteMCNN(
-                    [
-                        DiscreteLayer(
-                            weight=torch.zeros((8, 5), dtype=torch.int16),
-                            bias=torch.zeros(8, dtype=torch.int16),
-                            output_min=0,
-                            output_max=15,
-                        ),
-                        DiscreteLayer(
-                            weight=torch.zeros((5, 8), dtype=torch.int16),
-                            bias=torch.zeros(5, dtype=torch.int16),
-                            output_min=0,
-                            output_max=15,
-                        ),
-                    ]
-                )
+            DiscreteMCNN(
+                [
+                    DiscreteLayer(
+                        weight=torch.zeros((8, 5), dtype=torch.int16),
+                        bias=torch.zeros(8, dtype=torch.int16),
+                        output_min=0,
+                        output_max=15,
+                    ),
+                    DiscreteLayer(
+                        weight=torch.zeros((5, 8), dtype=torch.int16),
+                        bias=torch.zeros(5, dtype=torch.int16),
+                        output_min=0,
+                        output_max=15,
+                    ),
+                ]
             ),
             SchematicExportConfig(
                 emit_weights=False,
@@ -631,13 +762,33 @@ class SingleLayerExportTest(unittest.TestCase):
                 emit_layer_io_connectors=True,
             ),
         )
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((2, 2, 6)), "minecraft:black_concrete")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((10, 2, 6)), "minecraft:black_concrete")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((12, 2, 5)), "minecraft:white_concrete")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((12, 2, 6)), "minecraft:air")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((14, 2, 6)), "minecraft:black_concrete")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((10, 0, -2)), "minecraft:white_concrete")
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((12, 0, -3)), "minecraft:black_concrete")
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((2, 2, 6)),
+            "minecraft:black_concrete",
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((10, 2, 6)),
+            "minecraft:black_concrete",
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((12, 2, 5)),
+            "minecraft:white_concrete",
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((12, 2, 6)), "minecraft:air"
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((14, 2, 6)),
+            "minecraft:black_concrete",
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((10, 0, -2)),
+            "minecraft:white_concrete",
+        )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((12, 0, -3)),
+            "minecraft:black_concrete",
+        )
         for position in ((10, 1, -1), (11, 2, -2), (26, 1, -1), (27, 2, -2)):
             self.assertEqual(
                 odd_input_network_wiring.getBlockStateAt(position),
@@ -646,7 +797,7 @@ class SingleLayerExportTest(unittest.TestCase):
         for position in ((11, 2, -1), (27, 2, -1)):
             self.assertEqual(
                 odd_input_network_wiring.getBlockStateAt(position),
-                "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]",
+                _wire(north="side", south="side"),
             )
         for x, z, block in (
             (11, -1, "minecraft:white_concrete"),
@@ -658,11 +809,16 @@ class SingleLayerExportTest(unittest.TestCase):
             (23, -1, "minecraft:white_concrete"),
             (25, -2, "minecraft:black_concrete"),
         ):
-            self.assertEqual(odd_input_network_wiring.getBlockStateAt((x, -2, z)), block)
-        self.assertEqual(odd_input_network_wiring.getBlockStateAt((11, -2, 1)), "minecraft:white_concrete")
+            self.assertEqual(
+                odd_input_network_wiring.getBlockStateAt((x, -2, z)), block
+            )
+        self.assertEqual(
+            odd_input_network_wiring.getBlockStateAt((11, -2, 1)),
+            "minecraft:white_concrete",
+        )
         self.assertEqual(
             odd_input_network_wiring.getBlockStateAt((11, 2, 5)),
-            "minecraft:redstone_wire[east=up,north=side,power=15,south=none,west=none]",
+            _wire(power=15, east="up", north="side"),
         )
         for input_size, hidden_size, expected in (
             (
@@ -691,23 +847,23 @@ class SingleLayerExportTest(unittest.TestCase):
             ),
         ):
             phased_wiring = build_schematic(
-                export_plan_from_discrete(
-                    DiscreteMCNN(
-                        [
-                            DiscreteLayer(
-                                weight=torch.zeros((hidden_size, input_size), dtype=torch.int16),
-                                bias=torch.zeros(hidden_size, dtype=torch.int16),
-                                output_min=0,
-                                output_max=15,
+                DiscreteMCNN(
+                    [
+                        DiscreteLayer(
+                            weight=torch.zeros(
+                                (hidden_size, input_size), dtype=torch.int16
                             ),
-                            DiscreteLayer(
-                                weight=torch.zeros((2, hidden_size), dtype=torch.int16),
-                                bias=torch.zeros(2, dtype=torch.int16),
-                                output_min=0,
-                                output_max=15,
-                            ),
-                        ]
-                    )
+                            bias=torch.zeros(hidden_size, dtype=torch.int16),
+                            output_min=0,
+                            output_max=15,
+                        ),
+                        DiscreteLayer(
+                            weight=torch.zeros((2, hidden_size), dtype=torch.int16),
+                            bias=torch.zeros(2, dtype=torch.int16),
+                            output_min=0,
+                            output_max=15,
+                        ),
+                    ]
                 ),
                 SchematicExportConfig(
                     emit_weights=False,
@@ -720,23 +876,21 @@ class SingleLayerExportTest(unittest.TestCase):
             for x, z, block in expected:
                 self.assertEqual(phased_wiring.getBlockStateAt((x, -2, z)), block)
         full_connector_wiring = build_schematic(
-            export_plan_from_discrete(
-                DiscreteMCNN(
-                    [
-                        DiscreteLayer(
-                            weight=torch.zeros((3, 2), dtype=torch.int16),
-                            bias=torch.zeros(3, dtype=torch.int16),
-                            output_min=0,
-                            output_max=15,
-                        ),
-                        DiscreteLayer(
-                            weight=torch.zeros((2, 3), dtype=torch.int16),
-                            bias=torch.zeros(2, dtype=torch.int16),
-                            output_min=0,
-                            output_max=15,
-                        ),
-                    ]
-                )
+            DiscreteMCNN(
+                [
+                    DiscreteLayer(
+                        weight=torch.zeros((3, 2), dtype=torch.int16),
+                        bias=torch.zeros(3, dtype=torch.int16),
+                        output_min=0,
+                        output_max=15,
+                    ),
+                    DiscreteLayer(
+                        weight=torch.zeros((2, 3), dtype=torch.int16),
+                        bias=torch.zeros(2, dtype=torch.int16),
+                        output_min=0,
+                        output_max=15,
+                    ),
+                ]
             ),
             SchematicExportConfig(
                 emit_weights=True,
@@ -746,30 +900,30 @@ class SingleLayerExportTest(unittest.TestCase):
                 emit_layer_io_connectors=True,
             ),
         )
-        self.assertEqual(full_connector_wiring.getBlockStateAt((4, 1, 0)), "minecraft:barrel")
+        self.assertEqual(
+            full_connector_wiring.getBlockStateAt((4, 1, 0)), "minecraft:barrel"
+        )
         self.assertEqual(
             full_connector_wiring.getBlockStateAt((3, 1, 0)),
             "minecraft:comparator[facing=west,mode=subtract,powered=false]",
         )
         with self.assertRaises(ValueError):
             build_schematic(
-                export_plan_from_discrete(
-                    DiscreteMCNN(
-                        [
-                            DiscreteLayer(
-                                weight=torch.zeros((1, 1), dtype=torch.int16),
-                                bias=torch.zeros(1, dtype=torch.int16),
-                                output_min=0,
-                                output_max=15,
-                            ),
-                            DiscreteLayer(
-                                weight=torch.zeros((1, 1), dtype=torch.int16),
-                                bias=torch.zeros(1, dtype=torch.int16),
-                                output_min=0,
-                                output_max=15,
-                            ),
-                        ]
-                    )
+                DiscreteMCNN(
+                    [
+                        DiscreteLayer(
+                            weight=torch.zeros((1, 1), dtype=torch.int16),
+                            bias=torch.zeros(1, dtype=torch.int16),
+                            output_min=0,
+                            output_max=15,
+                        ),
+                        DiscreteLayer(
+                            weight=torch.zeros((1, 1), dtype=torch.int16),
+                            bias=torch.zeros(1, dtype=torch.int16),
+                            output_min=0,
+                            output_max=15,
+                        ),
+                    ]
                 ),
                 SchematicExportConfig(emit_layer_io_connectors=True),
             )

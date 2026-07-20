@@ -36,16 +36,23 @@ physical_bias = effective_bias + sum(inactive_subtraction for emitted modules)
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import mcschematic
 
-from .constants import BIAS_SOURCE_SLOTS, GLITCHED_UNSTACKABLE_STACK_LIMIT, MAX_BIAS_SIGNAL_STRENGTH
+from .constants import (
+    BIAS_SOURCE_SLOTS,
+    GLITCHED_UNSTACKABLE_STACK_LIMIT,
+    MAX_BIAS_SIGNAL_STRENGTH,
+)
 from .discrete import DiscreteMCNN
-from .quantization import ComparatorEncoding, comparator_subtractions, encode_comparator_weight
-
+from .encoding import (
+    ComparatorEncoding,
+    comparator_subtractions,
+    encode_comparator_weight,
+)
 
 BlockPlacement = tuple[int, int, int, str]
 
@@ -60,48 +67,15 @@ FURNACE_SOURCE_SLOTS = 3
 MAX_FURNACE_SIGNAL_STRENGTH = int(1 + 14 * GLITCHED_UNSTACKABLE_STACK_LIMIT)
 
 
-@dataclass(frozen=True)
-class ExportedConnection:
-    input_index: int
-    effective_weight: int
-    encoding: ComparatorEncoding
-    inactive_subtraction: int
-    active_subtraction: int
-
-
-@dataclass(frozen=True)
-class ExportedNeuron:
-    output_index: int
-    effective_bias: int
-    physical_bias: int
-    connections: tuple[ExportedConnection, ...]
-
-
-@dataclass(frozen=True)
-class ExportedLayer:
-    layer_index: int
-    input_size: int
-    output_size: int
-    output_min: int
-    output_max: int
-    neurons: tuple[ExportedNeuron, ...]
-
-
-@dataclass(frozen=True)
-class ExportPlan:
-    layer_sizes: tuple[int, ...]
-    layers: tuple[ExportedLayer, ...]
-
-
-@dataclass(frozen=True)
-class LayerPlacement:
-    layer: ExportedLayer
-    origin: tuple[int, int, int]
-    input_lane_phase: int
-
-    @property
-    def output_lane_phase(self) -> int:
-        return (self.input_lane_phase + self.layer.input_size) % 2
+def _wire(
+    power: int = 0,
+    *,
+    east: str = "none",
+    north: str = "none",
+    south: str = "none",
+    west: str = "none",
+) -> str:
+    return f"minecraft:redstone_wire[east={east},north={north},power={power},south={south},west={west}]"
 
 
 @dataclass(frozen=True)
@@ -130,18 +104,30 @@ class SchematicExportConfig:
     placeholder_bias_block: str = "minecraft:magenta_concrete"
     placeholder_weight_block: str = "minecraft:purple_concrete"
     slab_block: str = "minecraft:smooth_stone_slab[type=top,waterlogged=false]"
-    dust_west_side: str = "minecraft:redstone_wire[east=up,north=none,power=0,south=none,west=side]"
-    dust_north_south_power_0: str = "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"
-    dust_north_south_power_15: str = "minecraft:redstone_wire[east=none,north=side,power=15,south=side,west=none]"
-    dust_corner: str = "minecraft:redstone_wire[east=up,north=side,power=0,south=none,west=side]"
-    comparator_west: str = "minecraft:comparator[facing=west,mode=subtract,powered=false]"
-    comparator_south_on: str = "minecraft:comparator[facing=south,mode=compare,powered=true]"
-    comparator_south_off: str = "minecraft:comparator[facing=south,mode=compare,powered=false]"
-    repeater_south: str = "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"
-    input_repeater_south: str = "minecraft:repeater[delay=1,facing=south,locked=false,powered=true]"
-    input_repeater_north: str = "minecraft:repeater[delay=1,facing=north,locked=false,powered=true]"
-    output_repeater_south: str = "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"
-    output_repeater_north: str = "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"
+    comparator_west: str = (
+        "minecraft:comparator[facing=west,mode=subtract,powered=false]"
+    )
+    comparator_south_on: str = (
+        "minecraft:comparator[facing=south,mode=compare,powered=true]"
+    )
+    comparator_south_off: str = (
+        "minecraft:comparator[facing=south,mode=compare,powered=false]"
+    )
+    repeater_south: str = (
+        "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"
+    )
+    input_repeater_south: str = (
+        "minecraft:repeater[delay=1,facing=south,locked=false,powered=true]"
+    )
+    input_repeater_north: str = (
+        "minecraft:repeater[delay=1,facing=north,locked=false,powered=true]"
+    )
+    output_repeater_south: str = (
+        "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"
+    )
+    output_repeater_north: str = (
+        "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"
+    )
     torch_block: str = "minecraft:redstone_wall_torch[facing=north,lit=true]"
 
 
@@ -149,7 +135,9 @@ def signal_strength_furnace(signal_strength: int) -> str:
     """Return a furnace block entity that comparators read as ``signal_strength``."""
 
     if signal_strength < 0:
-        raise ValueError(f"furnace signal strength {signal_strength} must be non-negative")
+        raise ValueError(
+            f"furnace signal strength {signal_strength} must be non-negative"
+        )
     if signal_strength > MAX_FURNACE_SIGNAL_STRENGTH:
         raise ValueError(
             f"furnace signal strength {signal_strength} exceeds the configured "
@@ -169,7 +157,9 @@ def signal_strength_barrel(signal_strength: int) -> str:
     """Return a barrel block entity that comparators read as ``signal_strength``."""
 
     if signal_strength < 0:
-        raise ValueError(f"barrel signal strength {signal_strength} must be non-negative")
+        raise ValueError(
+            f"barrel signal strength {signal_strength} must be non-negative"
+        )
     if signal_strength > MAX_BIAS_SIGNAL_STRENGTH:
         raise ValueError(
             f"barrel signal strength {signal_strength} exceeds the configured "
@@ -186,9 +176,9 @@ def signal_strength_barrel(signal_strength: int) -> str:
 
 
 def is_representable_bias_signal(signal_strength: int) -> bool:
-    return (
-        0 <= signal_strength <= MAX_BIAS_SIGNAL_STRENGTH
-        and (signal_strength == 0 or _glitched_unstackable_items(signal_strength, BIAS_SOURCE_SLOTS) is not None)
+    return 0 <= signal_strength <= MAX_BIAS_SIGNAL_STRENGTH and (
+        signal_strength == 0
+        or _glitched_unstackable_items(signal_strength, BIAS_SOURCE_SLOTS) is not None
     )
 
 
@@ -213,7 +203,9 @@ def _stackable_furnace_items(signal_strength: int) -> list[str]:
     return items
 
 
-def _glitched_unstackable_items(signal_strength: int, slot_count: int) -> list[str] | None:
+def _glitched_unstackable_items(
+    signal_strength: int, slot_count: int
+) -> list[str] | None:
     for bucket_total in range(1, slot_count * GLITCHED_UNSTACKABLE_STACK_LIMIT + 1):
         signal = math.floor(1 + 14 * bucket_total / slot_count)
         if signal == signal_strength:
@@ -222,78 +214,18 @@ def _glitched_unstackable_items(signal_strength: int, slot_count: int) -> list[s
             slot = 0
             while remaining_buckets:
                 count = min(GLITCHED_UNSTACKABLE_STACK_LIMIT, remaining_buckets)
-                items.append(f'{{Slot:{slot}b,id:"minecraft:water_bucket",count:{count}}}')
+                items.append(
+                    f'{{Slot:{slot}b,id:"minecraft:water_bucket",count:{count}}}'
+                )
                 remaining_buckets -= count
                 slot += 1
             return items
     return None
 
 
-def export_plan_from_discrete(model: DiscreteMCNN) -> ExportPlan:
-    """Convert an exact discrete model into physical comparator-chain metadata."""
-
-    exported_layers: list[ExportedLayer] = []
-    for layer_index, layer in enumerate(model.layers):
-        neurons: list[ExportedNeuron] = []
-        for output_index in range(layer.weight.shape[0]):
-            connections: list[ExportedConnection] = []
-            inactive_total = 0
-            for input_index in range(layer.weight.shape[1]):
-                weight = int(layer.weight[output_index, input_index].item())
-                subtractions = comparator_subtractions(weight)
-                encoding = subtractions.encoding
-                if encoding.mode != "C" and furnace_signal_items(encoding.value) is None:
-                    raise ValueError(
-                        f"layer {layer_index} output {output_index} input {input_index} "
-                        f"requires unrepresentable furnace signal {encoding.value}"
-                    )
-                inactive_total += subtractions.inactive
-                connections.append(
-                    ExportedConnection(
-                        input_index=input_index,
-                        effective_weight=weight,
-                        encoding=encoding,
-                        inactive_subtraction=subtractions.inactive,
-                        active_subtraction=subtractions.active,
-                    )
-                )
-
-            effective_bias = int(layer.bias[output_index].item())
-            physical_bias = effective_bias + inactive_total
-            if physical_bias > MAX_BIAS_SIGNAL_STRENGTH:
-                raise ValueError(
-                    f"layer {layer_index} output {output_index} requires physical bias "
-                    f"{physical_bias}, exceeding maximum {MAX_BIAS_SIGNAL_STRENGTH}"
-                )
-            if not is_representable_bias_signal(physical_bias):
-                raise ValueError(
-                    f"layer {layer_index} output {output_index} requires physical bias "
-                    f"{physical_bias}, which is not representable by the capped barrel encoding"
-                )
-            neurons.append(
-                ExportedNeuron(
-                    output_index=output_index,
-                    effective_bias=effective_bias,
-                    physical_bias=physical_bias,
-                    connections=tuple(connections),
-                )
-            )
-
-        exported_layers.append(
-            ExportedLayer(
-                layer_index=layer_index,
-                input_size=int(layer.weight.shape[1]),
-                output_size=int(layer.weight.shape[0]),
-                output_min=int(layer.output_min),
-                output_max=int(layer.output_max),
-                neurons=tuple(neurons),
-            )
-        )
-
-    return ExportPlan(layer_sizes=tuple(model.layer_sizes()), layers=tuple(exported_layers))
-
-
-def _set_safe(schematic: mcschematic.MCSchematic, position: tuple[int, int, int], block: str) -> None:
+def _set_safe(
+    schematic: mcschematic.MCSchematic, position: tuple[int, int, int], block: str
+) -> None:
     schematic.setBlock(position, block)
 
 
@@ -326,7 +258,11 @@ def _place_if_air(
         _set_safe(schematic, position, block)
 
 
-def _set_support(schematic: mcschematic.MCSchematic, position: tuple[int, int, int], config: SchematicExportConfig) -> None:
+def _set_support(
+    schematic: mcschematic.MCSchematic,
+    position: tuple[int, int, int],
+    config: SchematicExportConfig,
+) -> None:
     if schematic.getBlockStateAt(position) in ("minecraft:air", config.slab_block):
         _set_safe(schematic, position, config.support_block)
 
@@ -347,21 +283,6 @@ def _place_repeater(
     _set_safe(schematic, position, repeater)
 
 
-def _input_dust(
-    power: int,
-    *,
-    east: str = "up",
-    north: str = "side",
-    south: str = "none",
-    west: str = "side",
-) -> str:
-    return (
-        "minecraft:redstone_wire["
-        f"east={east},north={north},power={max(0, min(15, power))},south={south},west={west}"
-        "]"
-    )
-
-
 def _input_pair_bases(x: int, input_size: int) -> tuple[tuple[int, bool], ...]:
     return tuple(
         (x + pair_index * INPUT_PAIR_WIDTH, pair_index * 2 + 1 < input_size)
@@ -374,18 +295,26 @@ def _is_black_lane(lane_index: int, lane_phase: int) -> bool:
 
 
 def _lane_block(config: SchematicExportConfig, lane_index: int, lane_phase: int) -> str:
-    return config.input_wiring_black_block if _is_black_lane(lane_index, lane_phase) else config.input_wiring_white_block
+    return (
+        config.input_wiring_black_block
+        if _is_black_lane(lane_index, lane_phase)
+        else config.input_wiring_white_block
+    )
 
 
-def _layer_placements(plan: ExportPlan, config: SchematicExportConfig) -> tuple[LayerPlacement, ...]:
-    placements: list[LayerPlacement] = []
+def _layer_placements(
+    model: DiscreteMCNN, config: SchematicExportConfig
+) -> list[tuple[int, int, int, int]]:
+    """Return (input_size, origin_x, origin_y, input_lane_phase) per layer."""
+    placements: list[tuple[int, int, int, int]] = []
     next_layer_x = 0
     next_lane_phase = 0
-    for layer in plan.layers:
-        placements.append(LayerPlacement(layer, (next_layer_x, 0, 0), next_lane_phase))
-        next_layer_x += layer.input_size * config.input_pitch
-        next_lane_phase = (next_lane_phase + layer.input_size) % 2
-    return tuple(placements)
+    for layer in model.layers:
+        input_size = int(layer.weight.shape[1])
+        placements.append((input_size, next_layer_x, 0, next_lane_phase))
+        next_layer_x += input_size * config.input_pitch
+        next_lane_phase = (next_lane_phase + input_size) % 2
+    return placements
 
 
 def _place_input_targets(
@@ -407,7 +336,9 @@ def _place_furnace_top_dust(
     config: SchematicExportConfig,
 ) -> None:
     _set_safe(schematic, position, dust)
-    _set_safe(schematic, (position[0], position[1] + 1, position[2]), config.dust_cover_block)
+    _set_safe(
+        schematic, (position[0], position[1] + 1, position[2]), config.dust_cover_block
+    )
 
 
 def _place_bias_source(
@@ -416,7 +347,11 @@ def _place_bias_source(
     signal_strength: int,
     config: SchematicExportConfig,
 ) -> None:
-    source_block = signal_strength_barrel(signal_strength) if config.emit_weights else config.placeholder_bias_block
+    source_block = (
+        signal_strength_barrel(signal_strength)
+        if config.emit_weights
+        else config.placeholder_bias_block
+    )
     if config.emit_weights or config.emit_subtraction:
         _set_safe(schematic, position, source_block)
 
@@ -432,11 +367,17 @@ def _place_weight_source(
     if not (config.emit_weights or config.emit_subtraction):
         return
 
-    source_block = signal_strength_furnace(signal_strength) if config.emit_weights else config.placeholder_weight_block
+    source_block = (
+        signal_strength_furnace(signal_strength)
+        if config.emit_weights
+        else config.placeholder_weight_block
+    )
     _set_safe(schematic, position, config.support_block)
     _set_safe(schematic, control_position, source_block)
     if config.emit_subtraction:
-        _place_furnace_top_dust(schematic, (position[0], position[1] + 1, position[2]), signal_dust, config)
+        _place_furnace_top_dust(
+            schematic, (position[0], position[1] + 1, position[2]), signal_dust, config
+        )
 
 
 def _place_connection_module(
@@ -444,7 +385,8 @@ def _place_connection_module(
     x: int,
     y: int,
     z: int,
-    connection: ExportedConnection,
+    mode: str,
+    value: int,
     has_next_input: bool,
     config: SchematicExportConfig,
 ) -> None:
@@ -461,7 +403,6 @@ def _place_connection_module(
     """
 
     column_x = x + 1
-    mode = connection.encoding.mode
 
     if config.emit_subtraction:
         _set_support(schematic, (column_x, y - 1, z), config)
@@ -472,12 +413,16 @@ def _place_connection_module(
     if mode == "C":
         return
 
-    signal_dust = config.dust_north_south_power_15 if mode == "A" else config.dust_north_south_power_0
+    signal_dust = (
+        _wire(power=15, north="side", south="side")
+        if mode == "A"
+        else _wire(north="side", south="side")
+    )
     _place_weight_source(
         schematic,
         (column_x, y, z + 2),
         (column_x, y, z + 3),
-        connection.encoding.value,
+        value,
         signal_dust,
         config,
     )
@@ -486,7 +431,9 @@ def _place_connection_module(
         return
 
     is_mode_a = mode == "A"
-    control_comparator = config.comparator_south_on if is_mode_a else config.comparator_south_off
+    control_comparator = (
+        config.comparator_south_on if is_mode_a else config.comparator_south_off
+    )
     control_block = config.torch_block if is_mode_a else config.repeater_south
     _set_safe(schematic, (column_x, y - 1, z + 1), config.support_block)
     _set_safe(schematic, (column_x, y, z + 1), control_comparator)
@@ -509,25 +456,29 @@ def _place_single_neuron_output_wiring(
     if input_size != 3 or not config.emit_subtraction:
         return
 
-    _place_pattern(schematic, (x, y, z), (
-        (0, -1, 5, config.support_block),
-        (3, -1, 5, config.dust_west_side),
-        (4, -1, 5, config.support_block),
-        (1, -1, 6, config.dust_west_side),
-        (2, -1, 6, config.support_block),
-        (0, 0, 5, config.dust_west_side),
-        (1, 0, 5, config.support_block),
-        (3, 0, 5, config.slab_block),
-        (4, 0, 5, config.dust_west_side),
-        (5, 0, 5, config.support_block),
-        (2, 0, 6, config.dust_west_side),
-        (3, 0, 6, config.support_block),
-        (1, 1, 5, config.dust_corner),
-        (2, 1, 5, config.support_block),
-        (5, 1, 5, config.dust_west_side),
-        (3, 1, 6, config.dust_corner),
-        (4, 1, 6, config.support_block),
-    ))
+    _place_pattern(
+        schematic,
+        (x, y, z),
+        (
+            (0, -1, 5, config.support_block),
+            (3, -1, 5, _wire(west="side", east="up")),
+            (4, -1, 5, config.support_block),
+            (1, -1, 6, _wire(west="side", east="up")),
+            (2, -1, 6, config.support_block),
+            (0, 0, 5, _wire(west="side", east="up")),
+            (1, 0, 5, config.support_block),
+            (3, 0, 5, config.slab_block),
+            (4, 0, 5, _wire(west="side", east="up")),
+            (5, 0, 5, config.support_block),
+            (2, 0, 6, _wire(west="side", east="up")),
+            (3, 0, 6, config.support_block),
+            (1, 1, 5, _wire(east="up", north="side", west="side")),
+            (2, 1, 5, config.support_block),
+            (5, 1, 5, _wire(west="side", east="up")),
+            (3, 1, 6, _wire(east="up", north="side", west="side")),
+            (4, 1, 6, config.support_block),
+        ),
+    )
     _place_repeater(schematic, (x + 3, y + 1, z + 5), config.repeater_south, config)
 
 
@@ -536,19 +487,31 @@ def _place_neuron(
     layer_origin_x: int,
     layer_origin_y: int,
     layer_origin_z: int,
-    neuron: ExportedNeuron,
+    output_index: int,
+    physical_bias: int,
+    connections: list[tuple[int, str, int]],
     config: SchematicExportConfig,
 ) -> None:
-    row_x, row_y, row_z = _neuron_bias_position(layer_origin_x, layer_origin_y, layer_origin_z, neuron.output_index)
+    """Place one neuron row.
 
-    _place_bias_source(schematic, (row_x, row_y, row_z), neuron.physical_bias, config)
+    ``connections`` is a list of ``(input_index, mode, value)`` tuples.
+    """
+    row_x, row_y, row_z = _neuron_bias_position(
+        layer_origin_x, layer_origin_y, layer_origin_z, output_index
+    )
 
-    for connection in neuron.connections:
-        x = row_x + connection.input_index * config.input_pitch
-        has_next_input = connection.input_index < len(neuron.connections) - 1
-        _place_connection_module(schematic, x, row_y, row_z, connection, has_next_input, config)
+    _place_bias_source(schematic, (row_x, row_y, row_z), physical_bias, config)
 
-    _place_single_neuron_output_wiring(schematic, row_x, row_y, row_z, len(neuron.connections), config)
+    for input_index, mode, value in connections:
+        x = row_x + input_index * config.input_pitch
+        has_next_input = input_index < len(connections) - 1
+        _place_connection_module(
+            schematic, x, row_y, row_z, mode, value, has_next_input, config
+        )
+
+    _place_single_neuron_output_wiring(
+        schematic, row_x, row_y, row_z, len(connections), config
+    )
 
 
 def _neuron_bias_position(
@@ -557,7 +520,11 @@ def _neuron_bias_position(
     layer_origin_z: int,
     output_index: int,
 ) -> tuple[int, int, int]:
-    return (layer_origin_x + output_index, layer_origin_y + output_index + 1, layer_origin_z)
+    return (
+        layer_origin_x + output_index,
+        layer_origin_y + output_index + 1,
+        layer_origin_z,
+    )
 
 
 def _place_normal_input_wiring_row(
@@ -591,22 +558,52 @@ def _place_normal_input_wiring_row(
             if not is_top_row:
                 _set_safe(schematic, (target_x + 1, y, z + 1), config.slab_block)
             if not is_bottom_row:
-                _set_safe(schematic, (target_x, y, z + 2), _input_dust(signal_power, west=west))
+                _set_safe(
+                    schematic,
+                    (target_x, y, z + 2),
+                    _wire(
+                        power=signal_power,
+                        east="up",
+                        north="side",
+                        south="none",
+                        west=west,
+                    ),
+                )
             if not is_top_row:
-                _set_safe(schematic, (target_x + 1, y, z + 2), config.input_wiring_black_block)
+                _set_safe(
+                    schematic, (target_x + 1, y, z + 2), config.input_wiring_black_block
+                )
         else:
             if not is_bottom_row:
-                _set_safe(schematic, (target_x, y, z + 1), _input_dust(signal_power, west=west))
+                _set_safe(
+                    schematic,
+                    (target_x, y, z + 1),
+                    _wire(
+                        power=signal_power,
+                        east="up",
+                        north="side",
+                        south="none",
+                        west=west,
+                    ),
+                )
             if not is_top_row:
-                _set_safe(schematic, (target_x + 1, y, z + 1), config.input_wiring_white_block)
+                _set_safe(
+                    schematic, (target_x + 1, y, z + 1), config.input_wiring_white_block
+                )
 
         if adds_extender_step and not is_top_row:
             if uses_black_lane:
-                _set_safe(schematic, (target_x + 1, y, z + 3), config.input_wiring_black_block)
-                _set_safe(schematic, (target_x + 1, y, z + 4), config.input_wiring_black_block)
+                _set_safe(
+                    schematic, (target_x + 1, y, z + 3), config.input_wiring_black_block
+                )
+                _set_safe(
+                    schematic, (target_x + 1, y, z + 4), config.input_wiring_black_block
+                )
             else:
                 _set_safe(schematic, (target_x + 1, y, z + 2), config.slab_block)
-                _set_safe(schematic, (target_x + 1, y, z + 3), config.input_wiring_white_block)
+                _set_safe(
+                    schematic, (target_x + 1, y, z + 3), config.input_wiring_white_block
+                )
 
 
 def _place_input_wiring_extender_lower_row(
@@ -618,16 +615,40 @@ def _place_input_wiring_extender_lower_row(
     config: SchematicExportConfig,
     lane_phase: int,
 ) -> None:
-    for pair_index, (base_x, has_second_target) in enumerate(_input_pair_bases(x, input_size)):
+    for pair_index, (base_x, has_second_target) in enumerate(
+        _input_pair_bases(x, input_size)
+    ):
         first_lane = pair_index * 2
         second_lane = first_lane + 1
         _place_input_targets(schematic, base_x, y, z, has_second_target)
-        _place_repeater(schematic, (base_x, y, z + 1), config.input_repeater_south, config, support_block=config.slab_block)
+        _place_repeater(
+            schematic,
+            (base_x, y, z + 1),
+            config.input_repeater_south,
+            config,
+            support_block=config.slab_block,
+        )
         _set_safe(schematic, (base_x + 1, y, z + 1), config.slab_block)
-        _set_safe(schematic, (base_x + 2, y, z + 1), _input_dust(1, east="none", south="side"))
-        _set_safe(schematic, (base_x + 3, y, z + 1), _lane_block(config, second_lane, lane_phase))
-        _set_safe(schematic, (base_x, y, z + 2), _input_dust(1, east="none", south="side"))
-        _set_safe(schematic, (base_x + 1, y, z + 2), _lane_block(config, first_lane, lane_phase))
+        _set_safe(
+            schematic,
+            (base_x + 2, y, z + 1),
+            _wire(power=1, east="none", north="side", south="side", west="side"),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 3, y, z + 1),
+            _lane_block(config, second_lane, lane_phase),
+        )
+        _set_safe(
+            schematic,
+            (base_x, y, z + 2),
+            _wire(power=1, east="none", north="side", south="side", west="side"),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 1, y, z + 2),
+            _lane_block(config, first_lane, lane_phase),
+        )
         _place_repeater(
             schematic,
             (base_x + 2, y, z + 2),
@@ -636,12 +657,38 @@ def _place_input_wiring_extender_lower_row(
             support_block=config.slab_block,
         )
         _set_safe(schematic, (base_x + 3, y, z + 2), config.slab_block)
-        _place_repeater(schematic, (base_x, y, z + 3), config.input_repeater_north, config, support_block=config.slab_block)
-        _set_safe(schematic, (base_x + 1, y, z + 3), _lane_block(config, first_lane, lane_phase))
-        _set_safe(schematic, (base_x + 2, y, z + 3), _input_dust(15, west="none"))
-        _set_safe(schematic, (base_x + 3, y, z + 3), _lane_block(config, second_lane, lane_phase))
-        _set_safe(schematic, (base_x, y, z + 4), _input_dust(15, west="none"))
-        _set_safe(schematic, (base_x + 1, y, z + 4), _lane_block(config, first_lane, lane_phase))
+        _place_repeater(
+            schematic,
+            (base_x, y, z + 3),
+            config.input_repeater_north,
+            config,
+            support_block=config.slab_block,
+        )
+        _set_safe(
+            schematic,
+            (base_x + 1, y, z + 3),
+            _lane_block(config, first_lane, lane_phase),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 2, y, z + 3),
+            _wire(power=15, east="up", north="side", west="none"),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 3, y, z + 3),
+            _lane_block(config, second_lane, lane_phase),
+        )
+        _set_safe(
+            schematic,
+            (base_x, y, z + 4),
+            _wire(power=15, east="up", north="side", west="none"),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 1, y, z + 4),
+            _lane_block(config, first_lane, lane_phase),
+        )
 
 
 def _place_input_wiring_extender_upper_row(
@@ -653,22 +700,58 @@ def _place_input_wiring_extender_upper_row(
     config: SchematicExportConfig,
     lane_phase: int,
 ) -> None:
-    for pair_index, (base_x, has_second_target) in enumerate(_input_pair_bases(x, input_size)):
+    for pair_index, (base_x, has_second_target) in enumerate(
+        _input_pair_bases(x, input_size)
+    ):
         first_lane = pair_index * 2
         second_lane = first_lane + 1
         _place_input_targets(schematic, base_x, y, z, has_second_target)
-        _place_repeater(schematic, (base_x, y, z + 1), config.input_repeater_south, config, support_block=config.slab_block)
+        _place_repeater(
+            schematic,
+            (base_x, y, z + 1),
+            config.input_repeater_south,
+            config,
+            support_block=config.slab_block,
+        )
         _set_safe(
             schematic,
             (base_x + 1, y, z + 1),
-            _lane_block(config, second_lane if pair_index == 0 else first_lane, lane_phase),
+            _lane_block(
+                config, second_lane if pair_index == 0 else first_lane, lane_phase
+            ),
         )
-        _set_safe(schematic, (base_x + 2, y, z + 1), _input_dust(15, south="side", west="side" if pair_index == 0 else "none"))
-        _set_safe(schematic, (base_x + 3, y, z + 1), _lane_block(config, second_lane, lane_phase))
+        _set_safe(
+            schematic,
+            (base_x + 2, y, z + 1),
+            _wire(
+                power=15,
+                east="up",
+                north="side",
+                south="side",
+                west="side" if pair_index == 0 else "none",
+            ),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 3, y, z + 1),
+            _lane_block(config, second_lane, lane_phase),
+        )
         if pair_index == 0:
-            _set_safe(schematic, (base_x - 1, y, z + 2), _lane_block(config, second_lane, lane_phase))
-        _set_safe(schematic, (base_x, y, z + 2), _input_dust(15, south="side", west="none"))
-        _set_safe(schematic, (base_x + 1, y, z + 2), _lane_block(config, first_lane, lane_phase))
+            _set_safe(
+                schematic,
+                (base_x - 1, y, z + 2),
+                _lane_block(config, second_lane, lane_phase),
+            )
+        _set_safe(
+            schematic,
+            (base_x, y, z + 2),
+            _wire(power=15, east="up", north="side", south="side", west="none"),
+        )
+        _set_safe(
+            schematic,
+            (base_x + 1, y, z + 2),
+            _lane_block(config, first_lane, lane_phase),
+        )
         _place_repeater(
             schematic,
             (base_x + 2, y, z + 2),
@@ -676,10 +759,28 @@ def _place_input_wiring_extender_upper_row(
             config,
             support_block=config.slab_block,
         )
-        _set_safe(schematic, (base_x + 3, y, z + 2), _lane_block(config, second_lane, lane_phase))
-        _place_repeater(schematic, (base_x, y, z + 3), config.input_repeater_south, config, support_block=config.slab_block)
-        _set_safe(schematic, (base_x + 2, y, z + 3), _input_dust(14, east="none", south="none"))
-        _set_safe(schematic, (base_x, y, z + 4), _input_dust(14, east="none", south="none"))
+        _set_safe(
+            schematic,
+            (base_x + 3, y, z + 2),
+            _lane_block(config, second_lane, lane_phase),
+        )
+        _place_repeater(
+            schematic,
+            (base_x, y, z + 3),
+            config.input_repeater_south,
+            config,
+            support_block=config.slab_block,
+        )
+        _set_safe(
+            schematic,
+            (base_x + 2, y, z + 3),
+            _wire(power=14, east="none", north="side", south="none", west="side"),
+        )
+        _set_safe(
+            schematic,
+            (base_x, y, z + 4),
+            _wire(power=14, east="none", north="side", south="none", west="side"),
+        )
 
 
 def _place_input_wiring(
@@ -687,7 +788,8 @@ def _place_input_wiring(
     layer_origin_x: int,
     layer_origin_y: int,
     layer_origin_z: int,
-    layer: ExportedLayer,
+    input_size: int,
+    output_size: int,
     config: SchematicExportConfig,
     lane_phase: int,
 ) -> None:
@@ -695,29 +797,29 @@ def _place_input_wiring(
         return
 
     wiring_z = layer_origin_z + 4
-    if layer.output_size > 0:
+    if output_size > 0:
         _place_normal_input_wiring_row(
             schematic,
             layer_origin_x,
             layer_origin_y + 1,
             wiring_z,
             INPUT_RELAY_PERIOD,
-            layer.input_size,
+            input_size,
             config,
             lane_phase=lane_phase,
             is_bottom_row=True,
         )
-    for output_index in range(layer.output_size):
+    for output_index in range(output_size):
         row_x = layer_origin_x + output_index + 1
         row_y = layer_origin_y + output_index + 2
         cycle = output_index % INPUT_RELAY_PERIOD
         if cycle == INPUT_RELAY_PERIOD - 1:
             _place_input_wiring_extender_lower_row(
-                schematic, row_x, row_y, wiring_z, layer.input_size, config, lane_phase
+                schematic, row_x, row_y, wiring_z, input_size, config, lane_phase
             )
         elif cycle == 0 and output_index > 0:
             _place_input_wiring_extender_upper_row(
-                schematic, row_x, row_y, wiring_z, layer.input_size, config, lane_phase
+                schematic, row_x, row_y, wiring_z, input_size, config, lane_phase
             )
         else:
             _place_normal_input_wiring_row(
@@ -726,35 +828,23 @@ def _place_input_wiring(
                 row_y,
                 wiring_z,
                 INPUT_RELAY_PERIOD - cycle,
-                layer.input_size,
+                input_size,
                 config,
                 lane_phase=lane_phase,
                 adds_extender_step=cycle == INPUT_RELAY_PERIOD - 2,
-                is_top_row=output_index == layer.output_size - 1,
+                is_top_row=output_index == output_size - 1,
                 is_bottom_row=False,
             )
 
 
-def _output_side_dust(*, east: str, north: str, south: str, west: str) -> str:
-    return f"minecraft:redstone_wire[east={east},north={north},power=0,south={south},west={west}]"
-
-
-def _top_entry_dust() -> str:
-    return _output_side_dust(east="side", north="none", south="side", west="none")
-
-
-def _lane_dust() -> str:
-    return _output_side_dust(east="side", north="none", south="none", west="up")
-
-
 def _output_relay_dust_blocks() -> dict[str, str]:
     return {
-        "full": "minecraft:redstone_wire[east=side,north=side,power=0,south=side,west=side]",
-        "north_up": "minecraft:redstone_wire[east=none,north=side,power=0,south=none,west=up]",
-        "north_south": "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]",
-        "south_up": "minecraft:redstone_wire[east=none,north=none,power=0,south=side,west=up]",
-        "east_north": "minecraft:redstone_wire[east=side,north=side,power=0,south=none,west=none]",
-        "east_north_south": "minecraft:redstone_wire[east=side,north=side,power=0,south=side,west=none]",
+        "full": _wire(east="side", north="side", south="side", west="side"),
+        "north_up": _wire(north="side", west="up"),
+        "north_south": _wire(north="side", south="side"),
+        "south_up": _wire(south="side", west="up"),
+        "east_north": _wire(east="side", north="side"),
+        "east_north_south": _wire(east="side", north="side", south="side"),
     }
 
 
@@ -773,13 +863,13 @@ def _place_output_relay_down_a_tile(
         (1, -2, -4, config.support_block),
         (1, -2, -3, config.support_block),
         (1, -2, -2, config.input_wiring_black_block),
-        (0, -2, -1, _lane_dust()),
+        (0, -2, -1, _wire(east="side", west="up")),
         (0, -1, -4, config.support_block),
         (1, -1, -4, dust["south_up"]),
         (0, -1, -3, config.support_block),
         (1, -1, -3, config.output_repeater_north),
         (0, -1, -2, config.input_wiring_black_block),
-        (0, 0, -4, _top_entry_dust()),
+        (0, 0, -4, _wire(east="side", south="side")),
         (0, 0, -3, config.output_repeater_south),
     ]
     if not trailing:
@@ -821,7 +911,7 @@ def _place_output_relay_down_b_tile(
         (3, -1, -2, config.output_repeater_north),
         (2, -1, -1, config.input_wiring_white_block),
         (3, -1, -1, dust["east_north"]),
-        (2, 0, -3, _top_entry_dust()),
+        (2, 0, -3, _wire(east="side", south="side")),
         (2, 0, -2, config.output_repeater_south),
         (3, 0, -2, config.input_wiring_black_block),
         (3, 0, -1, config.support_block),
@@ -867,7 +957,9 @@ def _place_output_relay_tile(
     """
 
     _place_output_relay_down_boundary_tile(schematic, origin, config)
-    _place_output_relay_down_a_tile(schematic, origin, config, leading=leading, trailing=trailing)
+    _place_output_relay_down_a_tile(
+        schematic, origin, config, leading=leading, trailing=trailing
+    )
     if include_white_lane:
         _place_output_relay_down_b_tile(schematic, origin, config)
 
@@ -900,8 +992,14 @@ def _copy_region(
     return copied_max
 
 
-def _module_atlas_entries(config: SchematicExportConfig) -> tuple[tuple[str, mcschematic.MCSchematic, tuple[int, int, int], tuple[int, int, int]], ...]:
-    entries: list[tuple[str, mcschematic.MCSchematic, tuple[int, int, int], tuple[int, int, int]]] = []
+def _module_atlas_entries(
+    config: SchematicExportConfig,
+) -> tuple[
+    tuple[str, mcschematic.MCSchematic, tuple[int, int, int], tuple[int, int, int]], ...
+]:
+    entries: list[
+        tuple[str, mcschematic.MCSchematic, tuple[int, int, int], tuple[int, int, int]]
+    ] = []
 
     def add(
         name: str,
@@ -919,15 +1017,42 @@ def _module_atlas_entries(config: SchematicExportConfig) -> tuple[tuple[str, mcs
     ):
         schematic = mcschematic.MCSchematic()
         source = (4, INPUT_RELAY_PERIOD if "relay_handoff" in name else 4, 0)
-        _place_output_lane(schematic, source, output_index, config, floor_y=0, lane_phase=lane_phase)
+        _place_output_lane(
+            schematic, source, output_index, config, floor_y=0, lane_phase=lane_phase
+        )
         add(name, schematic, (0, 0, -4), (source[0] + source[1] + 2, source[1] + 1, 2))
 
     relay_modules: tuple[tuple[str, object], ...] = (
-        ("relay_boundary", lambda schematic, origin: _place_output_relay_down_boundary_tile(schematic, origin, config)),
-        ("relay_black_leading", lambda schematic, origin: _place_output_relay_down_a_tile(schematic, origin, config, leading=True)),
-        ("relay_black_middle", lambda schematic, origin: _place_output_relay_down_a_tile(schematic, origin, config)),
-        ("relay_black_trailing", lambda schematic, origin: _place_output_relay_down_a_tile(schematic, origin, config, trailing=True)),
-        ("relay_white", lambda schematic, origin: _place_output_relay_down_b_tile(schematic, origin, config)),
+        (
+            "relay_boundary",
+            lambda schematic, origin: _place_output_relay_down_boundary_tile(
+                schematic, origin, config
+            ),
+        ),
+        (
+            "relay_black_leading",
+            lambda schematic, origin: _place_output_relay_down_a_tile(
+                schematic, origin, config, leading=True
+            ),
+        ),
+        (
+            "relay_black_middle",
+            lambda schematic, origin: _place_output_relay_down_a_tile(
+                schematic, origin, config
+            ),
+        ),
+        (
+            "relay_black_trailing",
+            lambda schematic, origin: _place_output_relay_down_a_tile(
+                schematic, origin, config, trailing=True
+            ),
+        ),
+        (
+            "relay_white",
+            lambda schematic, origin: _place_output_relay_down_b_tile(
+                schematic, origin, config
+            ),
+        ),
         (
             "relay_tile_leading_pair",
             lambda schematic, origin: _place_output_relay_tile(
@@ -971,7 +1096,9 @@ def _module_atlas_entries(config: SchematicExportConfig) -> tuple[tuple[str, mcs
     return tuple(entries)
 
 
-def build_module_atlas(config: SchematicExportConfig | None = None) -> mcschematic.MCSchematic:
+def build_module_atlas(
+    config: SchematicExportConfig | None = None,
+) -> mcschematic.MCSchematic:
     """Build a debug atlas with each output-wiring module isolated by an air gap."""
 
     config = config or SchematicExportConfig(emit_weights=False, emit_subtraction=False)
@@ -979,7 +1106,9 @@ def build_module_atlas(config: SchematicExportConfig | None = None) -> mcschemat
     cursor_x = 1
     max_position = (0, 0, 0)
     for _name, schematic, source_min, source_max in _module_atlas_entries(config):
-        module_max = _copy_region(schematic, atlas, source_min, source_max, (cursor_x, 1, 1))
+        module_max = _copy_region(
+            schematic, atlas, source_min, source_max, (cursor_x, 1, 1)
+        )
         max_position = (
             max(max_position[0], module_max[0]),
             max(max_position[1], module_max[1]),
@@ -1005,14 +1134,22 @@ def _place_output_lane(
     source_x, source_y, source_z = source_block
     subtractor_x = source_x - 1
     uses_black_lane = _is_black_lane(output_index, lane_phase)
-    lane_z = source_z + (OUTPUT_BLACK_LANE_FORWARD_Z if uses_black_lane else OUTPUT_WHITE_LANE_FORWARD_Z)
+    lane_z = source_z + (
+        OUTPUT_BLACK_LANE_FORWARD_Z if uses_black_lane else OUTPUT_WHITE_LANE_FORWARD_Z
+    )
     lane_block = _lane_block(config, output_index, lane_phase)
-    relay_handoff = source_y > floor_y and (source_y - floor_y) % INPUT_RELAY_PERIOD == 0
+    relay_handoff = (
+        source_y > floor_y and (source_y - floor_y) % INPUT_RELAY_PERIOD == 0
+    )
 
     if config.emit_subtraction:
         _set_safe(schematic, source_block, config.support_block)
         _set_support(schematic, (subtractor_x, source_y - 1, source_z + 1), config)
-        _set_safe(schematic, (subtractor_x, source_y, source_z + 1), config.comparator_south_off)
+        _set_safe(
+            schematic,
+            (subtractor_x, source_y, source_z + 1),
+            config.comparator_south_off,
+        )
 
     if not relay_handoff:
         repeater_z = source_z + OUTPUT_LANE_FORWARD_Z + (0 if uses_black_lane else 1)
@@ -1024,31 +1161,39 @@ def _place_output_lane(
             support_block=config.slab_block if uses_black_lane else lane_block,
         )
         if uses_black_lane:
-            _set_safe(schematic, (source_x, source_y - 1, source_z + OUTPUT_LANE_FORWARD_Z + 1), lane_block)
-            _set_safe(schematic, (source_x, source_y, source_z + OUTPUT_LANE_FORWARD_Z + 1), config.dust_north_south_power_0)
-    _set_safe(schematic, (source_x, source_y, lane_z), _top_entry_dust())
+            _set_safe(
+                schematic,
+                (source_x, source_y - 1, source_z + OUTPUT_LANE_FORWARD_Z + 1),
+                lane_block,
+            )
+            _set_safe(
+                schematic,
+                (source_x, source_y, source_z + OUTPUT_LANE_FORWARD_Z + 1),
+                _wire(north="side", south="side"),
+            )
+    _set_safe(schematic, (source_x, source_y, lane_z), _wire(east="side", south="side"))
 
     for y in range(source_y - 1, floor_y - 1, -1):
         step_down = source_y - y
         redstone_x = source_x + step_down
         _set_safe(schematic, (redstone_x - 1, y, lane_z), lane_block)
-        _set_safe(schematic, (redstone_x, y, lane_z), _lane_dust())
+        _set_safe(schematic, (redstone_x, y, lane_z), _wire(east="side", west="up"))
 
 
-def _output_block_x_offset(layer: ExportedLayer, config: SchematicExportConfig) -> int:
-    return layer.input_size * config.input_pitch
+def _output_block_x_offset(input_size: int, config: SchematicExportConfig) -> int:
+    return input_size * config.input_pitch
 
 
 def _output_source_block(
     layer_origin_x: int,
     layer_origin_y: int,
     layer_origin_z: int,
-    layer: ExportedLayer,
+    input_size: int,
     config: SchematicExportConfig,
     output_index: int,
 ) -> tuple[int, int, int]:
     return (
-        layer_origin_x + output_index + _output_block_x_offset(layer, config),
+        layer_origin_x + output_index + _output_block_x_offset(input_size, config),
         layer_origin_y + output_index + 1,
         layer_origin_z,
     )
@@ -1057,18 +1202,19 @@ def _output_source_block(
 def _output_relay_tile_x_range(
     layer_origin_x: int,
     layer_origin_y: int,
-    layer: ExportedLayer,
+    input_size: int,
+    output_size: int,
     config: SchematicExportConfig,
     *,
     relay_y: int,
     lane_phase: int,
 ) -> tuple[int, int]:
-    output_x = layer_origin_x + _output_block_x_offset(layer, config)
+    output_x = layer_origin_x + _output_block_x_offset(input_size, config)
     relay_height = relay_y - layer_origin_y
     first_lane_index = relay_height - 1
     first_black_lane_phase = 0 if _is_black_lane(first_lane_index, lane_phase) else 2
     first_tile_x = output_x + relay_height - 1 + first_black_lane_phase
-    last_lane_index = layer.output_size - 1
+    last_lane_index = output_size - 1
     last_tile_x = output_x + 2 * last_lane_index + 1 - relay_height
     return first_tile_x, last_tile_x
 
@@ -1078,28 +1224,39 @@ def _place_output_wiring(
     layer_origin_x: int,
     layer_origin_y: int,
     layer_origin_z: int,
-    layer: ExportedLayer,
+    input_size: int,
+    output_size: int,
     config: SchematicExportConfig,
     lane_phase: int,
 ) -> None:
     if not config.emit_output_wiring:
         return
 
-    for output_index in range(layer.output_size):
+    for output_index in range(output_size):
         _place_output_lane(
             schematic,
-            _output_source_block(layer_origin_x, layer_origin_y, layer_origin_z, layer, config, output_index),
+            _output_source_block(
+                layer_origin_x,
+                layer_origin_y,
+                layer_origin_z,
+                input_size,
+                config,
+                output_index,
+            ),
             output_index,
             config,
             floor_y=layer_origin_y,
             lane_phase=lane_phase,
         )
-    max_y = layer_origin_y + layer.output_size
-    for relay_y in range(layer_origin_y + INPUT_RELAY_PERIOD, max_y, INPUT_RELAY_PERIOD):
+    max_y = layer_origin_y + output_size
+    for relay_y in range(
+        layer_origin_y + INPUT_RELAY_PERIOD, max_y, INPUT_RELAY_PERIOD
+    ):
         first_tile_x, max_active_x = _output_relay_tile_x_range(
             layer_origin_x,
             layer_origin_y,
-            layer,
+            input_size,
+            output_size,
             config,
             relay_y=relay_y,
             lane_phase=lane_phase,
@@ -1133,108 +1290,317 @@ def _layer_io_bridge_template() -> tuple[BlockPlacement, ...]:
         (3, -4, 6, "minecraft:black_concrete"),
         (3, -3, -1, "minecraft:black_concrete"),
         (1, -3, 0, "minecraft:white_concrete"),
-        (3, -3, 0, "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"),
-        (1, -3, 1, "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"),
-        (3, -3, 1, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (1, -3, 2, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (3, -3, 2, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (1, -3, 3, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (3, -3, 3, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (1, -3, 4, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (3, -3, 4, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (1, -3, 5, "minecraft:redstone_wire[east=none,north=side,power=0,south=up,west=none]"),
-        (3, -3, 5, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
+        (
+            3,
+            -3,
+            0,
+            "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]",
+        ),
+        (
+            1,
+            -3,
+            1,
+            "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]",
+        ),
+        (
+            3,
+            -3,
+            1,
+            _wire(north="side", south="side"),
+        ),
+        (
+            1,
+            -3,
+            2,
+            _wire(north="side", south="side"),
+        ),
+        (
+            3,
+            -3,
+            2,
+            _wire(north="side", south="side"),
+        ),
+        (
+            1,
+            -3,
+            3,
+            _wire(north="side", south="side"),
+        ),
+        (
+            3,
+            -3,
+            3,
+            _wire(north="side", south="side"),
+        ),
+        (
+            1,
+            -3,
+            4,
+            _wire(north="side", south="side"),
+        ),
+        (
+            3,
+            -3,
+            4,
+            _wire(north="side", south="side"),
+        ),
+        (
+            1,
+            -3,
+            5,
+            _wire(north="side", south="up"),
+        ),
+        (
+            3,
+            -3,
+            5,
+            _wire(north="side", south="side"),
+        ),
         (1, -3, 6, "minecraft:white_concrete"),
-        (3, -3, 6, "minecraft:redstone_wire[east=none,north=side,power=0,south=up,west=none]"),
+        (
+            3,
+            -3,
+            6,
+            _wire(north="side", south="up"),
+        ),
         (1, -3, 7, "minecraft:white_concrete"),
         (3, -3, 7, "minecraft:black_concrete"),
         (3, -3, 8, "minecraft:black_concrete"),
         (2, -2, -1, "minecraft:black_concrete"),
-        (3, -2, -1, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
+        (
+            3,
+            -2,
+            -1,
+            _wire(east="side", west="up"),
+        ),
         (0, -2, 0, "minecraft:white_concrete"),
-        (1, -2, 0, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
+        (
+            1,
+            -2,
+            0,
+            _wire(east="side", west="up"),
+        ),
         (4, -2, 0, "minecraft:white_concrete"),
         (0, -2, 1, "minecraft:light_gray_concrete"),
-        (1, -2, 6, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
-        (1, -2, 7, "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"),
-        (3, -2, 7, "minecraft:redstone_wire[east=none,north=side,power=0,south=side,west=none]"),
+        (
+            1,
+            -2,
+            6,
+            _wire(north="side", south="side"),
+        ),
+        (
+            1,
+            -2,
+            7,
+            "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]",
+        ),
+        (
+            3,
+            -2,
+            7,
+            _wire(north="side", south="side"),
+        ),
         (1, -2, 8, "minecraft:white_concrete"),
-        (3, -2, 8, "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"),
+        (
+            3,
+            -2,
+            8,
+            "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]",
+        ),
         (3, -2, 9, "minecraft:black_concrete"),
         (1, -1, -1, "minecraft:black_concrete"),
-        (2, -1, -1, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
+        (
+            2,
+            -1,
+            -1,
+            _wire(east="side", west="up"),
+        ),
         (5, -1, -1, "minecraft:black_concrete"),
-        (0, -1, 0, "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]"),
+        (
+            0,
+            -1,
+            0,
+            _wire(east="side", south="side"),
+        ),
         (1, -1, 0, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
         (3, -1, 0, "minecraft:white_concrete"),
-        (4, -1, 0, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
-        (0, -1, 1, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            4,
+            -1,
+            0,
+            _wire(east="side", west="up"),
+        ),
+        (
+            0,
+            -1,
+            1,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (1, -1, 1, "minecraft:light_gray_concrete"),
         (0, -1, 2, "minecraft:light_gray_concrete"),
         (1, -1, 7, "minecraft:white_concrete"),
         (3, -1, 7, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
-        (1, -1, 8, "minecraft:redstone_wire[east=none,north=up,power=0,south=side,west=none]"),
+        (
+            1,
+            -1,
+            8,
+            _wire(north="up", south="side"),
+        ),
         (3, -1, 8, "minecraft:black_concrete"),
-        (3, -1, 9, "minecraft:redstone_wire[east=none,north=up,power=0,south=side,west=none]"),
-        (1, 0, -1, "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]"),
+        (
+            3,
+            -1,
+            9,
+            _wire(north="up", south="side"),
+        ),
+        (
+            1,
+            0,
+            -1,
+            _wire(east="side", south="side"),
+        ),
         (4, 0, -1, "minecraft:black_concrete"),
-        (5, 0, -1, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
-        (1, 0, 0, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            5,
+            0,
+            -1,
+            _wire(east="side", west="up"),
+        ),
+        (
+            1,
+            0,
+            0,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (2, 0, 0, "minecraft:white_concrete"),
-        (3, 0, 0, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
-        (1, 0, 1, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            3,
+            0,
+            0,
+            _wire(east="side", west="up"),
+        ),
+        (
+            1,
+            0,
+            1,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (2, 0, 1, "minecraft:light_gray_concrete"),
         (1, 0, 2, "minecraft:light_gray_concrete"),
         (1, 0, 6, "minecraft:target[power=0]"),
         (3, 0, 6, "minecraft:target[power=0]"),
         (5, 0, 6, "minecraft:target[power=0]"),
         (0, 0, 7, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
-        (1, 0, 7, "minecraft:redstone_wire[east=up,north=side,power=0,south=side,west=none]"),
+        (
+            1,
+            0,
+            7,
+            _wire(east="up", north="side", south="side"),
+        ),
         (2, 0, 7, "minecraft:white_concrete"),
-        (3, 0, 7, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            3,
+            0,
+            7,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (4, 0, 7, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
         (0, 0, 8, "minecraft:black_concrete"),
-        (3, 0, 8, "minecraft:redstone_wire[east=up,north=side,power=0,south=side,west=none]"),
+        (
+            3,
+            0,
+            8,
+            _wire(east="up", north="side", south="side"),
+        ),
         (4, 0, 8, "minecraft:black_concrete"),
         (3, 1, -1, "minecraft:black_concrete"),
-        (4, 1, -1, "minecraft:redstone_wire[east=side,north=none,power=0,south=none,west=up]"),
-        (2, 1, 0, "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]"),
+        (
+            4,
+            1,
+            -1,
+            _wire(east="side", west="up"),
+        ),
+        (
+            2,
+            1,
+            0,
+            _wire(east="side", south="side"),
+        ),
         (3, 1, 0, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
         (5, 1, 0, "minecraft:white_concrete"),
-        (2, 1, 1, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            2,
+            1,
+            1,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (3, 1, 1, "minecraft:light_gray_concrete"),
         (2, 1, 2, "minecraft:light_gray_concrete"),
         (0, 1, 6, "minecraft:target[power=0]"),
         (2, 1, 6, "minecraft:target[power=0]"),
         (4, 1, 6, "minecraft:target[power=0]"),
-        (0, 1, 7, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            0,
+            1,
+            7,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (1, 1, 7, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
-        (2, 1, 7, "minecraft:redstone_wire[east=up,north=side,power=0,south=none,west=side]"),
+        (
+            2,
+            1,
+            7,
+            _wire(east="up", north="side", west="side"),
+        ),
         (3, 1, 7, "minecraft:white_concrete"),
-        (4, 1, 7, "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"),
+        (
+            4,
+            1,
+            7,
+            "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]",
+        ),
         (5, 1, 7, "minecraft:smooth_stone_slab[type=top,waterlogged=false]"),
-        (0, 1, 8, "minecraft:redstone_wire[east=up,north=side,power=0,south=none,west=none]"),
+        (
+            0,
+            1,
+            8,
+            _wire(east="up", north="side"),
+        ),
         (1, 1, 8, "minecraft:black_concrete"),
-        (4, 1, 8, "minecraft:redstone_wire[east=up,north=side,power=0,south=none,west=side]"),
+        (
+            4,
+            1,
+            8,
+            _wire(east="up", north="side", west="side"),
+        ),
         (5, 1, 8, "minecraft:black_concrete"),
     )
 
 
-def _layer_io_bridge_blocks(config: SchematicExportConfig) -> tuple[BlockPlacement, ...]:
+def _layer_io_bridge_blocks(
+    config: SchematicExportConfig,
+) -> tuple[BlockPlacement, ...]:
     return tuple(
         placement
         for placement in _layer_io_bridge_template()
-        if placement[3] not in ("minecraft:target[power=0]", config.output_repeater_south, config.support_block)
+        if placement[3]
+        not in (
+            "minecraft:target[power=0]",
+            config.output_repeater_south,
+            config.support_block,
+        )
     )
 
 
-_LEADING_BRIDGE_CARRY_OFFSETS = frozenset({
-    (2, 0, 0),
-    (3, 0, 0),
-    (2, 1, 0),
-    (3, 1, -1),
-    (3, 1, 0),
-})
+_LEADING_BRIDGE_CARRY_OFFSETS = frozenset(
+    {
+        (2, 0, 0),
+        (3, 0, 0),
+        (2, 1, 0),
+        (3, 1, -1),
+        (3, 1, 0),
+    }
+)
 _TRAILING_BRIDGE_CARRY_OFFSETS = _LEADING_BRIDGE_CARRY_OFFSETS | frozenset({(3, -1, 0)})
 
 
@@ -1255,10 +1621,23 @@ def _clips_layer_io_bridge_placement(
     if actual_lane >= input_size:
         return True
 
-    leading_edge = group_index == 0 and actual_lane == 0 and relative_position in _LEADING_BRIDGE_CARRY_OFFSETS
-    trailing_edge = actual_lane == last_lane and relative_position in _TRAILING_BRIDGE_CARRY_OFFSETS
-    penultimate_edge = actual_lane == penultimate_lane and relative_position in {(5, 1, 0), (1, -1, 0)}
-    side_carry_overrun = actual_lane >= input_size - 3 and relative_position == (3, 1, 0)
+    leading_edge = (
+        group_index == 0
+        and actual_lane == 0
+        and relative_position in _LEADING_BRIDGE_CARRY_OFFSETS
+    )
+    trailing_edge = (
+        actual_lane == last_lane and relative_position in _TRAILING_BRIDGE_CARRY_OFFSETS
+    )
+    penultimate_edge = actual_lane == penultimate_lane and relative_position in {
+        (5, 1, 0),
+        (1, -1, 0),
+    }
+    side_carry_overrun = actual_lane >= input_size - 3 and relative_position == (
+        3,
+        1,
+        0,
+    )
     return leading_edge or trailing_edge or penultimate_edge or side_carry_overrun
 
 
@@ -1267,7 +1646,7 @@ def _place_layer_io_bridge(
     next_layer_origin_x: int,
     next_layer_origin_y: int,
     next_layer_origin_z: int,
-    next_layer: ExportedLayer,
+    next_input_size: int,
     config: SchematicExportConfig,
     lane_phase: int,
 ) -> None:
@@ -1277,73 +1656,141 @@ def _place_layer_io_bridge(
     origin_y = next_layer_origin_y + 2
     origin_z = next_layer_origin_z - 2
     phase_template_offset = 0 if lane_phase == 1 else 1
-    group_count = math.ceil((next_layer.input_size + phase_template_offset) / lanes_per_bridge_step)
+    group_count = math.ceil(
+        (next_input_size + phase_template_offset) / lanes_per_bridge_step
+    )
     for group_index in range(group_count):
         group_input_start = group_index * lanes_per_bridge_step
-        group_origin_x = next_layer_origin_x + group_index * x_stride - phase_template_offset * config.input_pitch
+        group_origin_x = (
+            next_layer_origin_x
+            + group_index * x_stride
+            - phase_template_offset * config.input_pitch
+        )
         group_origin = (group_origin_x, origin_y, origin_z)
         for placement in template:
             dx, _dy, _dz, _block = placement
-            actual_lane = group_input_start + dx // config.input_pitch - phase_template_offset
+            actual_lane = (
+                group_input_start + dx // config.input_pitch - phase_template_offset
+            )
             if actual_lane < 0:
                 continue
             if _clips_layer_io_bridge_placement(
                 placement,
                 actual_lane=actual_lane,
                 group_index=group_index,
-                input_size=next_layer.input_size,
+                input_size=next_input_size,
             ):
                 continue
             _place_if_air(schematic, group_origin, placement)
 
 
-def build_schematic(plan: ExportPlan, config: SchematicExportConfig | None = None) -> mcschematic.MCSchematic:
-    """Build a dense diagonally staggered debug schematic from an export plan."""
+def build_schematic(
+    model: DiscreteMCNN, config: SchematicExportConfig | None = None
+) -> mcschematic.MCSchematic:
+    """Build a dense diagonally staggered debug schematic from a discrete model."""
 
     config = config or SchematicExportConfig()
     schematic = mcschematic.MCSchematic()
-    layer_placements = _layer_placements(plan, config)
+    layer_placements = _layer_placements(model, config)
 
-    for placement in layer_placements:
-        layer_origin_x, layer_origin_y, layer_origin_z = placement.origin
+    for layer_index, (
+        layer,
+        (input_size, layer_origin_x, layer_origin_y, input_lane_phase),
+    ) in enumerate(zip(model.layers, layer_placements)):
+        layer_origin_z = 0
+        output_size = int(layer.weight.shape[0])
+        output_lane_phase = (input_lane_phase + input_size) % 2
+
         _place_input_wiring(
             schematic,
             layer_origin_x,
             layer_origin_y,
             layer_origin_z,
-            placement.layer,
+            input_size,
+            output_size,
             config,
-            placement.input_lane_phase,
+            input_lane_phase,
         )
-        for neuron in placement.layer.neurons:
-            _place_neuron(schematic, layer_origin_x, layer_origin_y, layer_origin_z, neuron, config)
+
+        for output_index in range(output_size):
+            connections: list[tuple[int, str, int]] = []
+            inactive_total = 0
+            for input_index in range(input_size):
+                weight = int(layer.weight[output_index, input_index].item())
+                subtractions = comparator_subtractions(weight)
+                encoding = subtractions.encoding
+                if (
+                    encoding.mode != "C"
+                    and furnace_signal_items(encoding.value) is None
+                ):
+                    raise ValueError(
+                        f"layer {layer_index} output {output_index} input {input_index} "
+                        f"requires unrepresentable furnace signal {encoding.value}"
+                    )
+                inactive_total += subtractions.inactive
+                connections.append((input_index, encoding.mode, encoding.value))
+
+            effective_bias = int(layer.bias[output_index].item())
+            physical_bias = effective_bias + inactive_total
+            if physical_bias > MAX_BIAS_SIGNAL_STRENGTH:
+                raise ValueError(
+                    f"layer {layer_index} output {output_index} requires physical bias "
+                    f"{physical_bias}, exceeding maximum {MAX_BIAS_SIGNAL_STRENGTH}"
+                )
+            if not is_representable_bias_signal(physical_bias):
+                raise ValueError(
+                    f"layer {layer_index} output {output_index} requires physical bias "
+                    f"{physical_bias}, which is not representable by the capped barrel encoding"
+                )
+
+            _place_neuron(
+                schematic,
+                layer_origin_x,
+                layer_origin_y,
+                layer_origin_z,
+                output_index,
+                physical_bias,
+                connections,
+                config,
+            )
+
         _place_output_wiring(
             schematic,
             layer_origin_x,
             layer_origin_y,
             layer_origin_z,
-            placement.layer,
+            input_size,
+            output_size,
             config,
-            placement.output_lane_phase,
+            output_lane_phase,
         )
 
     if config.emit_layer_io_connectors:
         if not config.emit_input_wiring or not config.emit_output_wiring:
-            raise ValueError("layer I/O connectors require both input and output wiring")
-        for placement in layer_placements[1:]:
+            raise ValueError(
+                "layer I/O connectors require both input and output wiring"
+            )
+        for (
+            next_input_size,
+            next_origin_x,
+            next_origin_y,
+            next_lane_phase,
+        ) in layer_placements[1:]:
             _place_layer_io_bridge(
                 schematic,
-                *placement.origin,
-                placement.layer,
+                next_origin_x,
+                next_origin_y,
+                0,
+                next_input_size,
                 config,
-                placement.input_lane_phase,
+                next_lane_phase,
             )
 
     return schematic
 
 
 def save_schematic(
-    plan: ExportPlan,
+    model: DiscreteMCNN,
     output_path: str | Path,
     *,
     config: SchematicExportConfig | None = None,
@@ -1353,7 +1800,7 @@ def save_schematic(
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    schematic = build_schematic(plan, config)
+    schematic = build_schematic(model, config)
     schematic.save(str(output_path.parent), output_path.stem, version)
     return output_path.with_suffix(".schem")
 

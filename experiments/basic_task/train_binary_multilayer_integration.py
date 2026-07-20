@@ -8,7 +8,6 @@ inter-layer wiring rather than training variance.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import torch
@@ -16,15 +15,11 @@ from torch import Tensor
 from torch.nn import functional as F
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
-from mcnn import (  # noqa: E402
+from mcnn import (
     DiscreteLayer,
     DiscreteMCNN,
     SchematicExportConfig,
-    export_plan_from_discrete,
     save_schematic,
 )
 
@@ -82,16 +77,20 @@ def hidden_targets(x: Tensor) -> Tensor:
 
 def output_targets(hidden: Tensor) -> Tensor:
     h0, h1, h2, h3 = hidden.unbind(dim=1)
-    return torch.stack(
-        (
-            1 + 14 * h0,
-            15 - 14 * h1,
-            2 + 6 * h0 - 4 * h2,
-            3 + 12 * h3,
-            5 + 5 * h0 - 4 * h1 + 3 * h2 - 2 * h3,
-        ),
-        dim=1,
-    ).round().clamp(0.0, 15.0)
+    return (
+        torch.stack(
+            (
+                1 + 14 * h0,
+                15 - 14 * h1,
+                2 + 6 * h0 - 4 * h2,
+                3 + 12 * h3,
+                5 + 5 * h0 - 4 * h1 + 3 * h2 - 2 * h3,
+            ),
+            dim=1,
+        )
+        .round()
+        .clamp(0.0, 15.0)
+    )
 
 
 @torch.no_grad()
@@ -144,16 +143,15 @@ def save_artifact(model: DiscreteMCNN, args: argparse.Namespace) -> None:
 
 
 def export(model: DiscreteMCNN, args: argparse.Namespace) -> None:
-    plan = export_plan_from_discrete(model)
     config = SchematicExportConfig(
         emit_input_wiring=args.io_wiring,
         emit_output_wiring=args.io_wiring,
         emit_layer_io_connectors=args.io_wiring,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    saved_path = save_schematic(plan, args.output, config=config)
+    saved_path = save_schematic(model, args.output, config=config)
     print(f"saved_schematic={saved_path}")
-    print(f"layer_sizes={plan.layer_sizes}")
+    print(f"layer_sizes={model.layer_sizes()}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -168,7 +166,9 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=ROOT / "artifacts" / "mcnn_binary_5x4x5_integration.schem",
     )
-    parser.add_argument("--io-wiring", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--io-wiring", action=argparse.BooleanOptionalAction, default=True
+    )
     return parser.parse_args()
 
 

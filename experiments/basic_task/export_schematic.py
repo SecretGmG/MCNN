@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
-from mcnn import SchematicExportConfig, discrete_from_state_dict, export_plan_from_discrete, save_module_atlas, save_schematic  # noqa: E402
+from mcnn import (
+    SchematicExportConfig,
+    comparator_subtractions,
+    discrete_from_state_dict,
+    save_module_atlas,
+    save_schematic,
+)
 
 
 def export(args: argparse.Namespace) -> None:
@@ -24,7 +26,6 @@ def export(args: argparse.Namespace) -> None:
 
     artifact = torch.load(args.artifact, map_location="cpu")
     model = discrete_from_state_dict(artifact["model"])
-    plan = export_plan_from_discrete(model)
     config = SchematicExportConfig(
         emit_weights=args.emit_weights,
         emit_subtraction=args.emit_subtraction,
@@ -32,22 +33,38 @@ def export(args: argparse.Namespace) -> None:
         emit_output_wiring=args.emit_output_wiring,
         emit_layer_io_connectors=args.emit_layer_io_connectors,
     )
-    saved_path = save_schematic(plan, args.output, config=config)
+    saved_path = save_schematic(model, args.output, config=config)
     print(f"saved_schematic={saved_path}")
-    print(f"layer_sizes={plan.layer_sizes}")
-    for layer in plan.layers:
-        connection_count = sum(len(neuron.connections) for neuron in layer.neurons)
-        max_physical_bias = max((neuron.physical_bias for neuron in layer.neurons), default=0)
+    print(f"layer_sizes={model.layer_sizes()}")
+    for layer_index, layer in enumerate(model.layers):
+        connection_count = int(layer.weight.count_nonzero().item())
+        max_physical_bias = max(
+            (
+                int(layer.bias[output_index].item())
+                + sum(
+                    comparator_subtractions(
+                        int(layer.weight[output_index, input_index].item())
+                    ).inactive
+                    for input_index in range(layer.weight.shape[1])
+                )
+                for output_index in range(layer.weight.shape[0])
+            ),
+            default=0,
+        )
         print(
-            f"layer={layer.layer_index} input={layer.input_size} output={layer.output_size} "
+            f"layer={layer_index} input={layer.weight.shape[1]} output={layer.weight.shape[0]} "
             f"connections={connection_count} max_physical_bias={max_physical_bias}"
         )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--artifact", default=ROOT / "artifacts" / "mcnn_digits_8x8_structural.pt")
-    parser.add_argument("--output", default=ROOT / "artifacts" / "mcnn_digits_8x8_layers.schem")
+    parser.add_argument(
+        "--artifact", default=ROOT / "artifacts" / "mcnn_digits_8x8_structural.pt"
+    )
+    parser.add_argument(
+        "--output", default=ROOT / "artifacts" / "mcnn_digits_8x8_layers.schem"
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--weights-only",

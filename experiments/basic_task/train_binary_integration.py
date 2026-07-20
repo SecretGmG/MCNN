@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import sys
 from pathlib import Path
 
 import torch
@@ -17,16 +16,11 @@ from torch import Tensor
 from torch.nn import functional as F
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
-from mcnn import (  # noqa: E402
+from mcnn import (
     DiscreteMCNN,
-    MCNNClassifier,
     SchematicExportConfig,
-    discrete_from_model,
-    export_plan_from_discrete,
+    TrainableMCNN,
     save_schematic,
 )
 
@@ -54,7 +48,9 @@ def binary_integration_targets(x: Tensor) -> Tensor:
 
 
 @torch.no_grad()
-def exact_metrics(model: MCNNClassifier | DiscreteMCNN, x: Tensor, y: Tensor) -> dict[str, float]:
+def exact_metrics(
+    model: TrainableMCNN | DiscreteMCNN, x: Tensor, y: Tensor
+) -> dict[str, float]:
     if isinstance(model, DiscreteMCNN):
         outputs = model.forward(x)
     else:
@@ -81,7 +77,7 @@ def train(args: argparse.Namespace) -> DiscreteMCNN:
     x = binary_inputs()
     y = binary_integration_targets(x)
     hidden_sizes = tuple(int(size) for size in args.hidden.split(",") if size)
-    model = MCNNClassifier(
+    model = TrainableMCNN(
         input_features=5,
         hidden_sizes=hidden_sizes,
         output_features=5,
@@ -120,7 +116,7 @@ def train(args: argparse.Namespace) -> DiscreteMCNN:
             break
 
     model.load_state_dict(best_state)
-    discrete_model = discrete_from_model(model)
+    discrete_model = model.discrete()
     discrete_metrics = exact_metrics(discrete_model, x, y)
     print(
         f"final_exact_mse={discrete_metrics['mse']:.4f} "
@@ -150,16 +146,15 @@ def train(args: argparse.Namespace) -> DiscreteMCNN:
 
 
 def export(model: DiscreteMCNN, args: argparse.Namespace) -> None:
-    plan = export_plan_from_discrete(model)
     config = SchematicExportConfig(
         emit_input_wiring=args.io_wiring,
         emit_output_wiring=args.io_wiring,
         emit_layer_io_connectors=args.io_wiring,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    saved_path = save_schematic(plan, args.output, config=config)
+    saved_path = save_schematic(model, args.output, config=config)
     print(f"saved_schematic={saved_path}")
-    print(f"layer_sizes={plan.layer_sizes}")
+    print(f"layer_sizes={model.layer_sizes()}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -169,7 +164,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden", default="")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--report-every", type=int, default=250)
-    parser.add_argument("--stop-when-exact", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--stop-when-exact", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument(
         "--artifact",
         type=Path,
@@ -180,7 +177,9 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=ROOT / "artifacts" / "mcnn_binary_5x5_integration.schem",
     )
-    parser.add_argument("--io-wiring", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--io-wiring", action=argparse.BooleanOptionalAction, default=True
+    )
     args = parser.parse_args()
     if args.epochs < 1:
         raise SystemExit("--epochs must be >= 1")

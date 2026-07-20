@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
-from .quantization import comparator_subtractions
-from .layers import MCNNLayer
-from .models import MCNNClassifier
+from .encoding import comparator_subtractions, inactive_subtraction
 
 
 @dataclass
@@ -68,7 +67,8 @@ class DiscreteMCNN:
 
     def physical_biases(self) -> list[int]:
         return [
-            int(layer.bias[output_index].item()) + sum(
+            int(layer.bias[output_index].item())
+            + sum(
                 inactive_subtraction(int(weight))
                 for weight in layer.weight[output_index].tolist()
             )
@@ -94,23 +94,6 @@ class DiscreteMCNN:
         }
 
 
-def discrete_from_model(model: MCNNClassifier) -> DiscreteMCNN:
-    layers: list[DiscreteLayer] = []
-    for module in model.layers:
-        if not isinstance(module, MCNNLayer):
-            raise TypeError(f"expected MCNNLayer, got {type(module).__name__}")
-        layers.append(
-            DiscreteLayer(
-                weight=module.quantized_weight(exact=True).detach().cpu().round().to(torch.int16),
-                bias=module.positive_bias().detach().cpu().round().clamp_min(1).to(torch.int16),
-                output_min=module.activation.lower,
-                output_max=module.activation.upper,
-                activation=module.activation.kind,
-            )
-        )
-    return DiscreteMCNN(layers)
-
-
 def discrete_from_state_dict(state: dict[str, object]) -> DiscreteMCNN:
     """Load a discrete model from the compact artifact state."""
 
@@ -130,11 +113,9 @@ def discrete_from_state_dict(state: dict[str, object]) -> DiscreteMCNN:
     return DiscreteMCNN(layers)
 
 
-def inactive_subtraction(weight: int) -> int:
-    return comparator_subtractions(weight).inactive
-
-
-def remove_hidden_unit(model: DiscreteMCNN, layer_index: int, unit_index: int) -> DiscreteMCNN:
+def remove_hidden_unit(
+    model: DiscreteMCNN, layer_index: int, unit_index: int
+) -> DiscreteMCNN:
     """Remove one hidden unit and compact adjacent layer matrices."""
 
     if layer_index < 0 or layer_index >= len(model.layers) - 1:
@@ -145,7 +126,9 @@ def remove_hidden_unit(model: DiscreteMCNN, layer_index: int, unit_index: int) -
     next_layer = pruned.layers[layer_index + 1]
 
     if unit_index < 0 or unit_index >= layer.weight.shape[0]:
-        raise ValueError(f"unit_index {unit_index} is out of range for layer {layer_index}")
+        raise ValueError(
+            f"unit_index {unit_index} is out of range for layer {layer_index}"
+        )
 
     keep_outputs = torch.ones(layer.weight.shape[0], dtype=torch.bool)
     keep_outputs[unit_index] = False
