@@ -21,14 +21,8 @@ from .encoding import (
     inactive_subtraction,
 )
 from .export import (
-    SchematicExportConfig,
-    build_module_atlas,
     build_schematic,
-    is_representable_bias_signal,
-    save_module_atlas,
     save_schematic,
-    signal_strength_barrel,
-    signal_strength_furnace,
 )
 from .quantization import (
     bounded_integer_ste,
@@ -58,7 +52,6 @@ __all__ = [
     "MAX_BIAS_SIGNAL_STRENGTH",
     "DiscreteLayer",
     "DiscreteMCNN",
-    "SchematicExportConfig",
     "ComparatorEncoding",
     "ComparatorSubtractions",
     "TrainableMCNN",
@@ -66,8 +59,6 @@ __all__ = [
     "bounded_integer_ste",
     "comparator_subtractions",
     "discrete_from_state_dict",
-    "is_representable_bias_signal",
-    "build_module_atlas",
     "build_schematic",
     "encode_comparator_weight",
     "exact_bounded_integer",
@@ -84,8 +75,5 @@ __all__ = [
     "mutate_discrete",
     "mutate_local_search_candidate",
     "structural_ablation",
-    "save_module_atlas",
     "save_schematic",
-    "signal_strength_barrel",
-    "signal_strength_furnace",
 ]

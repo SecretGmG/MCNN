@@ -19,7 +19,6 @@ ROOT = Path(__file__).resolve().parents[2]
 from mcnn import (
     DiscreteLayer,
     DiscreteMCNN,
-    SchematicExportConfig,
     save_schematic,
 )
 
@@ -143,13 +142,8 @@ def save_artifact(model: DiscreteMCNN, args: argparse.Namespace) -> None:
 
 
 def export(model: DiscreteMCNN, args: argparse.Namespace) -> None:
-    config = SchematicExportConfig(
-        emit_input_wiring=args.io_wiring,
-        emit_output_wiring=args.io_wiring,
-        emit_layer_io_connectors=args.io_wiring,
-    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    saved_path = save_schematic(model, args.output, config=config)
+    saved_path = save_schematic(model, args.output)
     print(f"saved_schematic={saved_path}")
     print(f"layer_sizes={model.layer_sizes()}")
 
@@ -159,12 +153,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--artifact",
         type=Path,
-        default=ROOT / "artifacts" / "mcnn_binary_5x4x5_integration.pt",
+        default=ROOT / "artifacts" / "integration" / "mcnn_binary_5x4x5_integration.pt",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "artifacts" / "mcnn_binary_5x4x5_integration.schem",
+        default=ROOT / "artifacts" / "integration" / "mcnn_binary_5x4x5_integration.schem",
     )
     parser.add_argument(
         "--io-wiring", action=argparse.BooleanOptionalAction, default=True
