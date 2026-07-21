@@ -48,8 +48,6 @@ def encode_comparator_weight(weight: int) -> ComparatorEncoding:
     reducing the required bias signal.
     """
 
-    if not -14 <= weight <= 14:
-        raise ValueError(f"weight {weight} is outside the Minecraft range [-14, 14]")
     if weight > 0:
         return ComparatorEncoding(mode="A", value=15 - weight)
     if weight < 0:

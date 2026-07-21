@@ -14,7 +14,6 @@ from torch.utils.data import DataLoader
 from .constants import MAX_BIAS_SIGNAL_STRENGTH
 from .discrete import DiscreteMCNN
 from .encoding import inactive_subtraction
-from .export import is_representable_bias_signal
 
 
 @dataclass
@@ -156,7 +155,6 @@ def discrete_score(
 def satisfies_physical_bias_cap(model: DiscreteMCNN, config: RefinementConfig) -> bool:
     return all(
         physical_bias <= config.max_physical_bias
-        and is_representable_bias_signal(physical_bias)
         for physical_bias in model.physical_biases()
     )
 

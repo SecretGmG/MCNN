@@ -10,11 +10,17 @@ from .constants import BIAS_SOURCE_SLOTS, GLITCHED_UNSTACKABLE_STACK_LIMIT, MAX_
 # Block palette
 # ---------------------------------------------------------------------------
 
-SUPPORT = "minecraft:light_gray_concrete"
+SUPPORT_WEIGHT = "minecraft:light_gray_concrete"
+SUPPORT_IN = "minecraft:light_blue_concrete"
+SUPPORT_OUT = "minecraft:blue_concrete"
 COMPARATOR_WEST = "minecraft:comparator[facing=west,mode=subtract,powered=false]"
 COMPARATOR_SOUTH = "minecraft:comparator[facing=south,mode=subtract,powered=false]"
 REDSTONE_BLOCK = "minecraft:redstone_block"
 TORCH_EAST = "minecraft:redstone_wall_torch[facing=east,lit=true]"
+TORCH_SOUTH = "minecraft:redstone_wall_torch[facing=south,lit=true]"
+REPEATER_SOUTH = "minecraft:repeater[delay=1,facing=south,locked=false,powered=false]"
+REPEATER_NORTH = "minecraft:repeater[delay=1,facing=north,locked=false,powered=false]"
+WIRE = "minecraft:redstone_wire"
 
 
 def _barrel(signal: int) -> str:
@@ -56,13 +62,13 @@ def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, ba
     If barrel_signal is None or 0, the barrel is omitted (zero weight).
     """
     _set = schematic.setBlock
-    _set((x + 0, y + 0, z + 0), SUPPORT)
+    _set((x + 0, y + 0, z + 0), SUPPORT_WEIGHT)
     _set((x + 0, y + 1, z + 0), COMPARATOR_WEST)
-    _set((x + 1, y + 1, z + 0), SUPPORT)
+    _set((x + 1, y + 1, z + 0), SUPPORT_WEIGHT)
     _set((x + 0, y + 0, z + 1), REDSTONE_BLOCK)
     _set((x + 0, y + 1, z + 1), COMPARATOR_SOUTH)
     _set((x + 1, y + 1, z + 1), REDSTONE_BLOCK)
-    _set((x + 0, y + 1, z + 2), SUPPORT)
+    _set((x + 0, y + 1, z + 2), SUPPORT_IN)
     _set((x + 1, y + 1, z + 2), TORCH_EAST)
     _set((x + 0, y + 1, z + 3), _barrel(barrel_signal))
 
@@ -71,6 +77,35 @@ def _place_barrel(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, si
     """Place the bias barrel at the start of a neuron row."""
     schematic.setBlock((x, y, z), _barrel(signal))
 
+
+def _build_wire_out(schematic: mcschematic.MCSchematic, x: int, y: int, z: int):
+    schematic.setBlock((x-1,y,z-1), SUPPORT_OUT)
+    schematic.setBlock((x-1,y+1,z-1), REPEATER_SOUTH)
+
+    if y % 2 == 1:
+        schematic.setBlock((x-1,y+1,z-2), SUPPORT_OUT)
+
+    _z = z-2-(y%2)
+
+    flip = False
+    delay = 0
+
+    for j in range(y+2):
+        _y = y-j
+
+        if j%16 == 15:
+            schematic.setBlock((x-1+j,_y-1,_z), SUPPORT_OUT)
+            schematic.setBlock((x-1+j,_y-0,_z), WIRE)
+            schematic.setBlock((x-1+j,_y+1,_z), TORCH_EAST)
+            schematic.setBlock((x+j,_y+1,_z), SUPPORT_OUT)
+            flip = not flip
+            delay += 1
+        else:
+            schematic.setBlock((x-1+j,_y,_z), SUPPORT_OUT)
+            schematic.setBlock((x-1+j,_y+1,_z), WIRE)
+
+    schematic.setBlock((x+y,-1,_z+1), SUPPORT_OUT)
+    schematic.setBlock((x+y,0,_z+1), REPEATER_NORTH)
 
 # ---------------------------------------------------------------------------
 # Build schematic
@@ -110,7 +145,13 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
                 my = output_index
                 _place_module(schematic, mx, my, 0, barrel_signal)
 
+            # Bias barrel
             _place_barrel(schematic, next_layer_x+output_index-1, output_index+1, 0,bias)
+
+
+            _build_wire_out(schematic, next_layer_x+output_index + input_size*2,output_index, z=0)
+
+
         next_layer_x += input_size * 2
 
     return schematic
