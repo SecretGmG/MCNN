@@ -32,10 +32,10 @@ SUPPORT_WEIGHT = "minecraft:light_gray_concrete"
 SUPPORT_IN = "minecraft:light_blue_concrete"
 SUPPORT_OUT = "minecraft:blue_concrete"
 SUPPORT_CONNECT = "minecraft:purple_concrete"
-
 REDSTONE_BLOCK = "minecraft:redstone_block"
 TORCH = "minecraft:redstone_torch[lit=true]"
 WIRE = "minecraft:redstone_wire"
+SLAB = "minecraft:smooth_stone_slab[type=top]"
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,9 @@ def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, ba
     set_block((x + 0, y + 1, z + 0), comparator("west"))
     set_block((x + 1, y + 1, z + 0), SUPPORT_WEIGHT)
 
-    set_block((x + 0, y + 0, z + 1), REDSTONE_BLOCK)
+    set_block((x + 0, y + 0, z + 1), SUPPORT_WEIGHT)
     set_block((x + 0, y + 1, z + 1), comparator("south"))
-    set_block((x + 1, y + 1, z + 1), REDSTONE_BLOCK)
+    set_block((x + 1, y + 1, z + 1), SUPPORT_WEIGHT)
 
     set_block((x + 0, y + 1, z + 2), SUPPORT_IN)
     set_block((x + 1, y + 1, z + 2), wall_torch("east"))
@@ -153,8 +153,11 @@ def _build_wire_out(schematic: mcschematic.MCSchematic, x: int, y: int, z: int) 
 
     if z - 2 == wire_z:
         set_block((x + y, -2, z - 4), SUPPORT_OUT)
-        set_block((x + y, -1, z - 4), repeater("south"))
-        delay += 1
+        set_block((x + y, -1, z - 4), WIRE)
+
+    set_block((x+y,-2,z-5), SLAB)
+    set_block((x+y,-1,z-5), repeater("south"))
+
 
     return delay
 
@@ -167,7 +170,7 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
     set_block((x, y - 1, z + 2), SUPPORT_CONNECT)
     set_block((x, y - 0, z + 2), TORCH)
 
-    for i in reversed(range(-1, 5)):
+    for i in reversed(range(-1, 6)):
         set_block((x, y - 4, z - i), SUPPORT_CONNECT)
 
         if delay >= 2:
@@ -179,7 +182,7 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
         else:
             set_block((x, y - 3, z - i), WIRE)
 
-    connector_z = z - 5
+    connector_z = z - 6
     place_top_block = True
 
     while delay > 0:
@@ -239,24 +242,26 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
         delays = []
 
         for output_index in range(output_size):
-            bias = int(layer.bias[output_index].item())
+            bias_signal = int(layer.bias[output_index].item())
 
             for input_index in range(input_size):
                 weight = int(layer.weight[output_index, input_index].item())
 
-                barrel_signal = 15 + abs(weight)
+                flip = output_index % 2 == 0
 
-                if output_index % 2 == 0:
-                    bias += max(0, weight)
+                barrel_signal = 15 + weight * (1 if flip else -1)
+
+                if flip:
+                    bias_signal += barrel_signal
                 else:
-                    bias -= min(weight, 0)
+                    bias_signal += 15
 
                 module_x = next_layer_x + output_index + input_index * 2
                 module_y = output_index
 
                 _place_module(schematic, module_x, module_y, 0, barrel_signal)
 
-            _place_barrel(schematic, next_layer_x + output_index - 1, output_index + 1, 0, bias)
+            _place_barrel(schematic, next_layer_x + output_index - 1, output_index + 1, 0, bias_signal)
 
             if layer_index != len(model.layers) - 1:
                 delay = _build_wire_out(schematic, next_layer_x + output_index + input_size * 2, output_index, 0)
@@ -266,6 +271,7 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
             max_delay = max(delays)
 
             for output_index in range(output_size):
+                pass
                 _build_connector(
                     schematic, next_layer_x + input_size * 2 + output_index * 2, 0, 0, max_delay - delays[output_index]
                 )
