@@ -7,8 +7,6 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .encoding import comparator_subtractions, inactive_subtraction
-
 
 @dataclass
 class DiscreteLayer:
@@ -64,20 +62,6 @@ class DiscreteMCNN:
     def hidden_units(self) -> int:
         sizes = self.layer_sizes()
         return sum(sizes[1:-1])
-
-    def physical_biases(self) -> list[int]:
-        return [
-            int(layer.bias[output_index].item())
-            + sum(
-                inactive_subtraction(int(weight))
-                for weight in layer.weight[output_index].tolist()
-            )
-            for layer in self.layers
-            for output_index in range(layer.weight.shape[0])
-        ]
-
-    def max_physical_bias(self) -> int:
-        return max(self.physical_biases(), default=0)
 
     def state_dict(self) -> dict[str, object]:
         return {

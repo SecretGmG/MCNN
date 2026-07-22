@@ -18,13 +18,6 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor, nn
 
-from .constants import (
-    DEFAULT_BIAS_MIN,
-    DEFAULT_OUTPUT_MAX,
-    DEFAULT_OUTPUT_MIN,
-    DEFAULT_WEIGHT_MAX,
-    DEFAULT_WEIGHT_MIN,
-)
 from .discrete import DiscreteLayer, DiscreteMCNN
 from .quantization import (
     _ste,
@@ -50,23 +43,10 @@ class TrainableMCNN(nn.Module):
         hidden_sizes: Sequence[int],
         output_features: int,
         *,
-        weight_min: float = DEFAULT_WEIGHT_MIN,
-        weight_max: float = DEFAULT_WEIGHT_MAX,
-        output_min: float = DEFAULT_OUTPUT_MIN,
-        output_max: float = DEFAULT_OUTPUT_MAX,
         hidden_activation: str = "bounded_integer",
         output_activation: str = "bounded_integer",
     ) -> None:
         super().__init__()
-        if weight_min > weight_max:
-            raise ValueError(
-                f"weight_min {weight_min} must be <= weight_max {weight_max}"
-            )
-        if output_min > output_max:
-            raise ValueError(
-                f"output_min {output_min} must be <= output_max {output_max}"
-            )
-
         sizes = [input_features, *hidden_sizes, output_features]
         layer_params: list[dict[str, object]] = []
         for layer_index, (in_features, out_features) in enumerate(
@@ -85,8 +65,6 @@ class TrainableMCNN(nn.Module):
             )
 
         self.layer_params = layer_params
-        self.weight_min = weight_min
-        self.weight_max = weight_max
         self.hidden_activation = hidden_activation
         self.output_activation = output_activation
 

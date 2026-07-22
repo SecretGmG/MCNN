@@ -3,13 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import mcschematic
-
-from .constants import BIAS_SOURCE_SLOTS, GLITCHED_UNSTACKABLE_STACK_LIMIT, MAX_BIAS_SIGNAL_STRENGTH
+import torch
 from .discrete import DiscreteMCNN
 
-# ---------------------------------------------------------------------------
-# Block helpers
-# ---------------------------------------------------------------------------
+MAX_SIGNAL_STRENGTH = int(1 + 14 * 64)
 
 
 def comparator(facing: str, mode: str = "subtract") -> str:
@@ -24,10 +21,6 @@ def repeater(facing: str, delay: int = 1) -> str:
     return f"minecraft:repeater[delay={delay},facing={facing},locked=false,powered=false]"
 
 
-# ---------------------------------------------------------------------------
-# Block palette
-# ---------------------------------------------------------------------------
-
 SUPPORT_WEIGHT = "minecraft:light_gray_concrete"
 SUPPORT_IN = "minecraft:light_blue_concrete"
 SUPPORT_OUT = "minecraft:blue_concrete"
@@ -38,20 +31,15 @@ WIRE = "minecraft:redstone_wire"
 SLAB = "minecraft:smooth_stone_slab[type=top]"
 
 
-# ---------------------------------------------------------------------------
-# Barrel signal encoding
-# ---------------------------------------------------------------------------
-
-
 def _barrel(signal: int) -> str:
     """Barrel block entity with the given comparator signal strength."""
-    if signal < 0 or signal > MAX_BIAS_SIGNAL_STRENGTH:
-        raise ValueError(f"barrel signal {signal} out of range [0, {MAX_BIAS_SIGNAL_STRENGTH}]")
+    if signal < 0 or signal > MAX_SIGNAL_STRENGTH:
+        raise ValueError(f"barrel signal {signal} out of range [0, {MAX_SIGNAL_STRENGTH}]")
 
     if signal == 0:
         return 'minecraft:barrel{CustomName:\'{"italic":false,"text":"0"}\'}'
 
-    items = _glitched_unstackable_items(signal, BIAS_SOURCE_SLOTS)
+    items = _glitched_unstackable_items(signal)
     if items is None:
         raise ValueError(f"cannot encode barrel signal {signal}")
 
@@ -63,10 +51,10 @@ def _barrel(signal: int) -> str:
     )
 
 
-def _glitched_unstackable_items(signal: int, slot_count: int) -> list[str] | None:
+def _glitched_unstackable_items(signal: int, slot_count: int = 27) -> list[str] | None:
     import math
 
-    for bucket_total in range(1, slot_count * GLITCHED_UNSTACKABLE_STACK_LIMIT + 1):
+    for bucket_total in range(1, slot_count * 64 + 1):
         sig = math.floor(1 + 14 * bucket_total / slot_count)
         if sig != signal:
             continue
@@ -76,7 +64,7 @@ def _glitched_unstackable_items(signal: int, slot_count: int) -> list[str] | Non
         slot = 0
 
         while remaining:
-            count = min(GLITCHED_UNSTACKABLE_STACK_LIMIT, remaining)
+            count = min(64, remaining)
             items.append(f'{{Slot:{slot}b,id:"minecraft:water_bucket",count:{count}}}')
             remaining -= count
             slot += 1
@@ -84,11 +72,6 @@ def _glitched_unstackable_items(signal: int, slot_count: int) -> list[str] | Non
         return items
 
     return None
-
-
-# ---------------------------------------------------------------------------
-# Module placement
-# ---------------------------------------------------------------------------
 
 
 def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, barrel_signal: int):
@@ -216,9 +199,46 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
     set_block((x, y - 3, connector_z), SUPPORT_CONNECT)
 
 
-# ---------------------------------------------------------------------------
-# Build schematic
-# ---------------------------------------------------------------------------
+def _compute_signal_strengths(
+    model: DiscreteMCNN,
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    layer_signal_strengths: list[tuple[torch.Tensor, torch.Tensor]] = []
+
+    for layer in model.layers:
+        input_size = int(layer.weight.shape[1])
+        output_size = int(layer.weight.shape[0])
+
+        bias_signal_strengths = torch.empty(
+            output_size,
+            dtype=torch.int64,
+        )
+        network_signal_strengths = torch.empty(
+            (output_size, input_size),
+            dtype=torch.int64,
+        )
+
+        for output_index in range(output_size):
+            bias_signal = int(layer.bias[output_index].item())
+            flip = output_index % 2 == 0
+
+            for input_index in range(input_size):
+                weight = int(layer.weight[output_index, input_index].item())
+                network_signal = 15 + weight * (1 if flip else -1)
+
+                network_signal_strengths[output_index, input_index] = network_signal
+
+                if flip:
+                    bias_signal += network_signal
+                else:
+                    bias_signal += 15
+
+            bias_signal_strengths[output_index] = bias_signal
+
+        layer_signal_strengths.append(
+            (bias_signal_strengths, network_signal_strengths)
+        )
+
+    return layer_signal_strengths
 
 
 def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
@@ -233,53 +253,76 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
         y = layer_origin_y + output_index
     """
     schematic = mcschematic.MCSchematic()
+    layer_signal_strengths = _compute_signal_strengths(model)
+
     next_layer_x = 0
+    last_layer_index = len(model.layers) - 1
 
     for layer_index, layer in enumerate(model.layers):
         input_size = int(layer.weight.shape[1])
         output_size = int(layer.weight.shape[0])
+        is_last_layer = layer_index == last_layer_index
 
-        delays = []
+        bias_signal_strengths, network_signal_strengths = (
+            layer_signal_strengths[layer_index]
+        )
+
+        delays: list[int] = []
 
         for output_index in range(output_size):
-            bias_signal = int(layer.bias[output_index].item())
-
             for input_index in range(input_size):
-                weight = int(layer.weight[output_index, input_index].item())
-
-                flip = output_index % 2 == 0
-
-                barrel_signal = 15 + weight * (1 if flip else -1)
-
-                if flip:
-                    bias_signal += barrel_signal
-                else:
-                    bias_signal += 15
-
-                module_x = next_layer_x + output_index + input_index * 2
+                module_x = (
+                    next_layer_x
+                    + output_index
+                    + input_index * 2
+                )
                 module_y = output_index
 
-                _place_module(schematic, module_x, module_y, 0, barrel_signal)
+                _place_module(
+                    schematic,
+                    module_x,
+                    module_y,
+                    0,
+                    int(
+                        network_signal_strengths[
+                            output_index,
+                            input_index,
+                        ].item()
+                    ),
+                )
 
-            _place_barrel(schematic, next_layer_x + output_index - 1, output_index + 1, 0, bias_signal)
+            _place_barrel(
+                schematic,
+                next_layer_x + output_index - 1,
+                output_index + 1,
+                0,
+                int(bias_signal_strengths[output_index].item()),
+            )
 
-            if layer_index != len(model.layers) - 1:
-                delay = _build_wire_out(schematic, next_layer_x + output_index + input_size * 2, output_index, 0)
+            if not is_last_layer:
+                delay = _build_wire_out(
+                    schematic,
+                    next_layer_x + output_index + input_size * 2,
+                    output_index,
+                    0,
+                )
                 delays.append(delay)
 
-        if layer_index != len(model.layers) - 1:
+        if not is_last_layer:
             max_delay = max(delays)
 
-            for output_index in range(output_size):
-                pass
+            for output_index, delay in enumerate(delays):
                 _build_connector(
-                    schematic, next_layer_x + input_size * 2 + output_index * 2, 0, 0, max_delay - delays[output_index]
+                    schematic,
+                    next_layer_x + input_size * 2 + output_index * 2,
+                    0,
+                    0,
+                    max_delay - delay,
                 )
 
         next_layer_x += input_size * 2
 
     return schematic
-
 
 def save_schematic(
     model: DiscreteMCNN,
