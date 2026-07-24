@@ -18,7 +18,6 @@ Usage: .venv/bin/python experiments/basic_task/curate.py
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -73,9 +72,9 @@ def save_progress(progress: dict):
 
 
 def export_curated(progress: dict):
-    digits = load_digits()
-    images = digits.images.astype(np.float32)
-    targets = digits.target
+    x_flat, targets = load_digits(return_X_y=True)
+    images = np.asarray(x_flat, dtype=np.float32).reshape(-1, 8, 8)
+    targets = np.asarray(targets)
 
     kept_x, kept_y = [], []
     stats = {}
@@ -123,17 +122,17 @@ def _parse_decision(ans: str) -> str | None:
 
 
 def main():
-    digits = load_digits()
-    images = digits.images.astype(np.float32)
-    targets = digits.target
+    x_flat, targets = load_digits(return_X_y=True)
+    images = np.asarray(x_flat, dtype=np.float32).reshape(-1, 8, 8)
+    targets = np.asarray(targets)
     total = len(images)
 
-    os.makedirs(OUT, exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
     progress = load_progress()
     start = progress["last_index"]
 
     print(f"MCNN Curation — {len(progress['decisions'])}/{total} done, resuming at #{start}")
-    print(f"a=all  x=exclude  #-#=range  #,#=list  b=back  q=quit")
+    print("a=all  x=exclude  #-#=range  #,#=list  b=back  q=quit")
     print()
 
     i = start
@@ -150,7 +149,7 @@ def main():
         print(_ascii_full(img, THRESHOLDS))
 
         try:
-            raw = input(f"[a/x/#-#/#,#/b/q] ").strip()
+            raw = input("[a/x/#-#/#,#/b/q] ").strip()
         except (EOFError, KeyboardInterrupt):
             raw = "q"
 

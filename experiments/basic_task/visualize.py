@@ -1,13 +1,8 @@
-"""Visualize MCNN training results: metrics, confusion matrix, false predictions, debug trace.
-
-Usage:
-    .venv/bin/python experiments/basic_task/visualize.py --run-dir artifacts/run
-"""
+"""Minimal evaluation visuals for the consolidated MCNN pipeline."""
 
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import matplotlib
@@ -17,173 +12,89 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from mcnn import DiscreteMCNN, discrete_from_state_dict
+from mcnn import model_from_artifact_state
 
 
-def _load_model_and_data(run_dir: Path):
+def load_run_model(run_dir: Path):
     artifact = torch.load(run_dir / "model.pt", map_location="cpu")
-    model = discrete_from_state_dict(artifact["model"])
-    return model
+    return model_from_artifact_state(artifact["model"])
 
 
-def plot_confusion_matrix(model: DiscreteMCNN, labels: np.ndarray, preds: np.ndarray, out_dir: Path):
-    cm = np.zeros((10, 10), dtype=int)
-    for t, p in zip(labels, preds):
-        cm[t, p] += 1
+def load_curated_data() -> tuple[np.ndarray, np.ndarray]:
+    data = np.load("artifacts/curation/curated_dataset.npz")
+    return data["x"].astype(np.float32), data["y"].astype(np.int64)
 
-    total = cm.sum()
-    correct = cm.diagonal().sum()
-    acc = correct / total if total > 0 else 0
 
-    fig, ax = plt.subplots(figsize=(8, 7))
-    im = ax.imshow(cm, cmap="Blues", vmin=0)
-    ax.set_xticks(range(10))
-    ax.set_yticks(range(10))
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title("Confusion Matrix")
-    for i in range(10):
-        for j in range(10):
-            if cm[i, j] > 0:
-                color = "white" if cm[i, j] > cm.max() / 2 else "black"
-                ax.text(j, i, str(cm[i, j]), ha="center", va="center", color=color, fontsize=8)
-    fig.colorbar(im, ax=ax, shrink=0.8)
-    fig.suptitle(f"Confusion Matrix (accuracy={acc:.3f}, {total} samples)", fontsize=12)
-    fig.tight_layout()
-    fig.savefig(out_dir / "confusion_matrix.png", dpi=120)
-    plt.close(fig)
-    print(f"saved {out_dir / 'confusion_matrix.png'}")
+def confusion_matrix(labels: np.ndarray, preds: np.ndarray, classes: int = 10) -> np.ndarray:
+    cm = np.zeros((classes, classes), dtype=int)
+    for t, p in zip(labels, preds, strict=True):
+        cm[int(t), int(p)] += 1
     return cm
 
 
-def plot_false_predictions(model: DiscreteMCNN, images: np.ndarray, labels: np.ndarray, preds: np.ndarray, out_dir: Path, max_examples: int = 20):
-    false_mask = preds != labels
-    false_indices = np.where(false_mask)[0]
-    if len(false_indices) == 0:
-        print("No false predictions!")
-        return
-    rng = np.random.RandomState(42)
-    selected = rng.choice(false_indices, size=min(max_examples, len(false_indices)), replace=False)
-    n = len(selected)
-    cols = min(5, n)
-    rows = (n + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.5, rows * 2.5))
-    if rows == 1 and cols == 1:
-        axes = np.array([[axes]])
-    elif rows == 1:
-        axes = axes.reshape(1, -1)
-    elif cols == 1:
-        axes = axes.reshape(-1, 1)
-    for idx, sel in enumerate(selected):
-        r, c = idx // cols, idx % cols
-        binary = (images[sel] > 4).astype(float).reshape(8, 8)
-        axes[r, c].imshow(binary, cmap="gray_r", vmin=0, vmax=1)
-        axes[r, c].set_title(f"True:{labels[sel]} Pred:{preds[sel]}", fontsize=9)
-        axes[r, c].axis("off")
-    for idx in range(n, rows * cols):
-        r, c = idx // cols, idx % cols
-        axes[r, c].axis("off")
-    fig.suptitle(f"False Predictions ({len(false_indices)} total, showing {n})", fontsize=12)
+def save_confusion_plot(cm: np.ndarray, out_dir: Path) -> None:
+    total = cm.sum()
+    acc = cm.diagonal().sum() / total if total else 0.0
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(cm, cmap="Blues")
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+    ax.set_title(f"Confusion Matrix (acc={acc:.3f})")
+    ax.set_xticks(range(cm.shape[1]))
+    ax.set_yticks(range(cm.shape[0]))
+
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            value = cm[i, j]
+            if value:
+                color = "white" if value > cm.max() / 2 else "black"
+                ax.text(j, i, str(value), ha="center", va="center", color=color, fontsize=7)
+
+    fig.colorbar(im, ax=ax, shrink=0.8)
     fig.tight_layout()
-    fig.savefig(out_dir / "false_predictions.png", dpi=120)
+    path = out_dir / "confusion_matrix.png"
+    fig.savefig(path, dpi=120)
     plt.close(fig)
-    print(f"saved {out_dir / 'false_predictions.png'}")
+    print(f"saved {path}")
 
 
-def plot_per_class_accuracy(labels: np.ndarray, preds: np.ndarray, out_dir: Path):
-    per_class_correct = np.zeros(10, dtype=int)
-    per_class_total = np.zeros(10, dtype=int)
-    for t, p in zip(labels, preds):
-        per_class_total[t] += 1
-        if t == p:
-            per_class_correct[t] += 1
-    per_class_acc = per_class_correct / np.maximum(per_class_total, 1)
+def save_per_class_plot(labels: np.ndarray, preds: np.ndarray, out_dir: Path) -> None:
+    totals = np.zeros(10, dtype=int)
+    correct = np.zeros(10, dtype=int)
+
+    for t, p in zip(labels, preds, strict=True):
+        totals[int(t)] += 1
+        if int(t) == int(p):
+            correct[int(t)] += 1
+
+    acc = correct / np.maximum(totals, 1)
+
     fig, ax = plt.subplots(figsize=(8, 4))
-    bars = ax.bar(range(10), per_class_acc, color="steelblue", edgecolor="white")
-    ax.set_xlabel("Digit Class")
+    bars = ax.bar(range(10), acc, color="#4c72b0")
+    ax.set_xlabel("Class")
     ax.set_ylabel("Accuracy")
+    ax.set_ylim(0.0, 1.05)
     ax.set_title("Per-Class Accuracy")
-    ax.set_ylim(0, 1.05)
     ax.set_xticks(range(10))
-    ax.axhline(y=per_class_correct.sum() / per_class_total.sum(), color="r", ls="--", alpha=0.5, label="overall")
-    for i, (bar, acc, total) in enumerate(zip(bars, per_class_acc, per_class_total)):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02, f"{acc:.2f}\n(n={total})", ha="center", fontsize=7)
-    ax.legend()
+
+    for bar, score, total in zip(bars, acc, totals, strict=True):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.02,
+            f"{score:.2f}\n(n={int(total)})",
+            ha="center",
+            fontsize=7,
+        )
+
     fig.tight_layout()
-    fig.savefig(out_dir / "per_class_accuracy.png", dpi=120)
+    path = out_dir / "per_class_accuracy.png"
+    fig.savefig(path, dpi=120)
     plt.close(fig)
-    print(f"saved {out_dir / 'per_class_accuracy.png'}")
+    print(f"saved {path}")
 
 
-def export_debug_trace(model: DiscreteMCNN, out_dir: Path):
-    """Export one correct input-output pair per class showing hidden activations."""
-    data = np.load("artifacts/curation/curated_dataset.npz")
-    x_all = data["x"].astype(np.float32)
-    y_all = data["y"].astype(np.int64)
-
-    lines = ["MCNN Debug Trace — one correct prediction per class", "=" * 60]
-
-    for digit in range(10):
-        mask = y_all == digit
-        indices = np.where(mask)[0]
-        found = None
-        for idx in indices:
-            inp = torch.tensor(x_all[idx].reshape(1, 64))
-            with torch.no_grad():
-                out = model.forward(inp)
-            if out.argmax(dim=1).item() == digit:
-                found = idx
-                break
-        if found is None:
-            lines.append(f"\nDigit {digit}: no correct prediction found")
-            continue
-
-        inp = torch.tensor(x_all[found].reshape(1, 64))
-        with torch.no_grad():
-            out = model.forward(inp)
-        out_clamped = out.round().clamp(0, 15).squeeze().int().tolist()
-
-        lines.append(f"\nDigit {digit} (correct) — sample #{found}")
-        lines.append("  Input (8×8 binary):")
-        for row in range(8):
-            line = "    "
-            for col in range(8):
-                line += "█" if int(x_all[found, row * 8 + col]) else "·"
-            lines.append(line)
-
-        lines.append("  Output (clamped 0–15):")
-        for d in range(10):
-            marker = " <-- correct" if d == digit else ""
-            bar = "█" * int(min(out_clamped[d], 30))
-            lines.append(f"    {d}: {out_clamped[d]:2d} {bar}{marker}")
-
-        # Hidden layer activations (binary step: pre > 0 → 1)
-        hidden = inp.squeeze().int()
-        for layer_idx, layer in enumerate(model.layers):
-            w = layer.weight.to(dtype=hidden.dtype)
-            b = layer.bias.to(dtype=hidden.dtype)
-            pre = (w @ hidden + b).int()
-            active = (pre > 0).int()
-            lines.append(f"  Hidden layer {layer_idx} ({active.shape[0]} units, {active.sum().item()} active):")
-            if active.sum() == 0:
-                lines.append("    (all inactive)")
-            else:
-                shown = 0
-                for u in range(active.shape[0]):
-                    if active[u].item():
-                        if shown < 20:
-                            lines.append(f"    h{u:02d}: pre={pre[u].item():+4d} → active")
-                        shown += 1
-                if shown > 20:
-                    lines.append(f"    ... ({shown} total active)")
-            hidden = active
-
-    trace = "\n".join(lines)
-    (out_dir / "debug_trace.txt").write_text(trace)
-    print(f"saved {out_dir / 'debug_trace.txt'}")
-
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", default="artifacts/run")
     args = parser.parse_args()
@@ -192,27 +103,20 @@ def main():
     if not run_dir.exists():
         raise SystemExit(f"Run directory not found: {run_dir}")
 
-    model = _load_model_and_data(run_dir)
+    model = load_run_model(run_dir)
+    x_all, y_all = load_curated_data()
 
-    # Load curated data for evaluation
-    data = np.load("artifacts/curation/curated_dataset.npz")
-    x_all = data["x"].astype(np.float32)
-    y_all = data["y"].astype(np.int64)
     x = torch.tensor(x_all)
     with torch.no_grad():
-        outputs = model.forward(x)
-    preds = outputs.argmax(dim=1).numpy()
+        logits = model(x, mode="exact")
+    preds = logits.argmax(dim=1).cpu().numpy()
 
-    cm = plot_confusion_matrix(model, y_all, preds, run_dir)
-    plot_false_predictions(model, x_all, y_all, preds, run_dir)
-    plot_per_class_accuracy(y_all, preds, run_dir)
-    export_debug_trace(model, run_dir)
+    cm = confusion_matrix(y_all, preds)
+    save_confusion_plot(cm, run_dir)
+    save_per_class_plot(y_all, preds, run_dir)
 
-    # Print summary
-    total_correct = cm.diagonal().sum()
-    total = cm.sum()
-    print(f"\nAccuracy: {total_correct}/{total} = {total_correct/total:.3f}")
-    print(f"All saved to {run_dir}/")
+    accuracy = cm.diagonal().sum() / max(1, cm.sum())
+    print(f"accuracy={accuracy:.3f} ({cm.diagonal().sum()}/{cm.sum()})")
 
 
 if __name__ == "__main__":

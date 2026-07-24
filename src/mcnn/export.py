@@ -4,9 +4,10 @@ from pathlib import Path
 
 import mcschematic
 import torch
-from .discrete import DiscreteMCNN
 
-MAX_SIGNAL_STRENGTH = int(1 + 14 * 64)
+from .model import MCNNModel
+
+MAX_SIGNAL_STRENGTH = 1 + 14 * 64
 
 
 def comparator(facing: str, mode: str = "subtract") -> str:
@@ -25,7 +26,6 @@ SUPPORT_WEIGHT = "minecraft:light_gray_concrete"
 SUPPORT_IN = "minecraft:light_blue_concrete"
 SUPPORT_OUT = "minecraft:blue_concrete"
 SUPPORT_CONNECT = "minecraft:purple_concrete"
-REDSTONE_BLOCK = "minecraft:redstone_block"
 TORCH = "minecraft:redstone_torch[lit=true]"
 WIRE = "minecraft:redstone_wire"
 SLAB = "minecraft:smooth_stone_slab[type=top]"
@@ -74,11 +74,7 @@ def _glitched_unstackable_items(signal: int, slot_count: int = 27) -> list[str] 
     return None
 
 
-def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, barrel_signal: int):
-    """Place one weight module at the given origin.
-
-    If barrel_signal is None or 0, the barrel is omitted (zero weight).
-    """
+def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, barrel_signal: int) -> None:
     set_block = schematic.setBlock
 
     set_block((x + 0, y + 0, z + 0), SUPPORT_WEIGHT)
@@ -86,17 +82,17 @@ def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, ba
     set_block((x + 1, y + 1, z + 0), SUPPORT_WEIGHT)
 
     set_block((x + 0, y + 0, z + 1), SUPPORT_WEIGHT)
-    set_block((x + 0, y + 1, z + 1), comparator("south"))
     set_block((x + 1, y + 1, z + 1), SUPPORT_WEIGHT)
 
     set_block((x + 0, y + 1, z + 2), SUPPORT_IN)
     set_block((x + 1, y + 1, z + 2), wall_torch("east"))
 
-    set_block((x + 0, y + 1, z + 3), _barrel(barrel_signal))
+    if barrel_signal != 15:
+        set_block((x + 0, y + 1, z + 1), comparator("south"))
+        set_block((x + 0, y + 1, z + 3), _barrel(barrel_signal))
 
 
-def _place_barrel(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, signal: int):
-    """Place the bias barrel at the start of a neuron row."""
+def _place_barrel(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, signal: int) -> None:
     schematic.setBlock((x, y, z), _barrel(signal))
 
 
@@ -138,14 +134,13 @@ def _build_wire_out(schematic: mcschematic.MCSchematic, x: int, y: int, z: int) 
         set_block((x + y, -2, z - 4), SUPPORT_OUT)
         set_block((x + y, -1, z - 4), WIRE)
 
-    set_block((x+y,-2,z-5), SLAB)
-    set_block((x+y,-1,z-5), repeater("south"))
-
+    set_block((x + y, -2, z - 5), SLAB)
+    set_block((x + y, -1, z - 5), repeater("south"))
 
     return delay
 
 
-def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, delay: int):
+def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, delay: int) -> None:
     set_block = schematic.setBlock
 
     set_block((x, y - 3, z + 2), SUPPORT_CONNECT)
@@ -174,21 +169,11 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
 
         if delay >= 2:
             schematic.setBlock((x + y, y - 3, connector_z), repeater("north", 2))
-            return delay - 2
+            return
 
         if delay == 1:
             schematic.setBlock((x + y, y - 3, connector_z), repeater("north"))
-            return 0
-
-        if delay >= 2:
-            set_block((x + y, y - 1, connector_z), repeater("south", 2))
-            delay -= 2
-        elif delay == 1:
-            set_block((x + y, y - 1, connector_z), repeater("south"))
-            delay = 0
-        else:
-            set_block((x, y - 1, connector_z), WIRE)
-            place_top_block = False
+            return
 
         connector_z -= 1
 
@@ -199,23 +184,17 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
     set_block((x, y - 3, connector_z), SUPPORT_CONNECT)
 
 
-def _compute_signal_strengths(
-    model: DiscreteMCNN,
-) -> list[tuple[torch.Tensor, torch.Tensor]]:
+def compute_signal_strengths(model: MCNNModel) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Return per-layer (bias_signals, network_signals) for export placement."""
+    layers = model.discrete_layers()
     layer_signal_strengths: list[tuple[torch.Tensor, torch.Tensor]] = []
 
-    for layer in model.layers:
+    for layer in layers:
         input_size = int(layer.weight.shape[1])
         output_size = int(layer.weight.shape[0])
 
-        bias_signal_strengths = torch.empty(
-            output_size,
-            dtype=torch.int64,
-        )
-        network_signal_strengths = torch.empty(
-            (output_size, input_size),
-            dtype=torch.int64,
-        )
+        bias_signals = torch.empty(output_size, dtype=torch.int64)
+        network_signals = torch.empty((output_size, input_size), dtype=torch.int64)
 
         for output_index in range(output_size):
             bias_signal = int(layer.bias[output_index].item())
@@ -223,59 +202,49 @@ def _compute_signal_strengths(
 
             for input_index in range(input_size):
                 weight = int(layer.weight[output_index, input_index].item())
+                if weight == 0:
+                    network_signal = 0
+                    network_signals[output_index, input_index] = 0
+                    continue
+
                 network_signal = 15 + weight * (1 if flip else -1)
-
-                network_signal_strengths[output_index, input_index] = network_signal
-
+                network_signals[output_index, input_index] = network_signal
                 if flip:
                     bias_signal += network_signal
                 else:
                     bias_signal += 15
 
-            bias_signal_strengths[output_index] = bias_signal
+            bias_signals[output_index] = bias_signal
 
-        layer_signal_strengths.append(
-            (bias_signal_strengths, network_signal_strengths)
-        )
+        layer_signal_strengths.append((bias_signals, network_signals))
 
     return layer_signal_strengths
 
 
-def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
-    """Tile nn_modules for each weight in a diagonal grid.
-
-    The module places redstone blocks at (x+0, y+0, z+1) and
-    (x+1, y+1, z+1). For a checkerboard in the (x, y, z=1) plane,
-    we need alternating parity.
-
-    Module origin:
-        x = layer_origin_x + output_index + input_index * 2
-        y = layer_origin_y + output_index
-    """
+def build_schematic(model: MCNNModel) -> mcschematic.MCSchematic:
     schematic = mcschematic.MCSchematic()
-    layer_signal_strengths = _compute_signal_strengths(model)
+    layers = model.discrete_layers()
+    layer_signal_strengths = compute_signal_strengths(model)
 
     next_layer_x = 0
-    last_layer_index = len(model.layers) - 1
+    last_layer_index = len(layers) - 1
 
-    for layer_index, layer in enumerate(model.layers):
+    for layer_index, layer in enumerate(layers):
         input_size = int(layer.weight.shape[1])
         output_size = int(layer.weight.shape[0])
         is_last_layer = layer_index == last_layer_index
 
-        bias_signal_strengths, network_signal_strengths = (
-            layer_signal_strengths[layer_index]
-        )
+        bias_signals, network_signals = layer_signal_strengths[layer_index]
 
         delays: list[int] = []
 
         for output_index in range(output_size):
             for input_index in range(input_size):
-                module_x = (
-                    next_layer_x
-                    + output_index
-                    + input_index * 2
-                )
+                weight = int(layer.weight[output_index, input_index].item())
+                if weight == 0:
+                    continue
+
+                module_x = next_layer_x + output_index + input_index * 2
                 module_y = output_index
 
                 _place_module(
@@ -283,12 +252,7 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
                     module_x,
                     module_y,
                     0,
-                    int(
-                        network_signal_strengths[
-                            output_index,
-                            input_index,
-                        ].item()
-                    ),
+                    int(network_signals[output_index, input_index].item()),
                 )
 
             _place_barrel(
@@ -296,7 +260,7 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
                 next_layer_x + output_index - 1,
                 output_index + 1,
                 0,
-                int(bias_signal_strengths[output_index].item()),
+                int(bias_signals[output_index].item()),
             )
 
             if not is_last_layer:
@@ -308,9 +272,8 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
                 )
                 delays.append(delay)
 
-        if not is_last_layer:
+        if not is_last_layer and delays:
             max_delay = max(delays)
-
             for output_index, delay in enumerate(delays):
                 _build_connector(
                     schematic,
@@ -324,8 +287,9 @@ def build_schematic(model: DiscreteMCNN) -> mcschematic.MCSchematic:
 
     return schematic
 
+
 def save_schematic(
-    model: DiscreteMCNN,
+    model: MCNNModel,
     output_path: str | Path,
     *,
     version: mcschematic.Version = mcschematic.Version.JE_1_21_5,
