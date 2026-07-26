@@ -38,6 +38,8 @@ class PipelineConfig:
     signal_penalty_weight: float = 0.05
     signal_penalty_threshold: float = 800.0
     signal_penalty_warmup_epochs: int = 20
+    identity_warmup_epochs: int = 0
+    identity_warmup_layer_indices: tuple[int, ...] = ()
     seed: int = 1
     report_every: int = 1
 
@@ -190,6 +192,11 @@ def train_classic(
     history_exportable_val_accuracy: list[float] = []
 
     for epoch in range(1, config.ste_epochs + 1):
+        warmup_active = epoch <= config.identity_warmup_epochs
+        for layer_index in config.identity_warmup_layer_indices:
+            model.weights[layer_index].requires_grad_(not warmup_active)
+            model.biases[layer_index].requires_grad_(not warmup_active)
+
         model.train()
         for x, y in train_loader:
             x = x.to(device)
@@ -286,6 +293,9 @@ def train_classic(
             break
 
     model.load_state_dict(best_state)
+    for layer_index in config.identity_warmup_layer_indices:
+        model.weights[layer_index].requires_grad_(True)
+        model.biases[layer_index].requires_grad_(True)
     return {
         "best_epoch": best_epoch,
         "best_val_accuracy": best_raw_acc,

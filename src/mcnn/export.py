@@ -23,8 +23,10 @@ def repeater(facing: str, delay: int = 1) -> str:
 
 
 SUPPORT_WEIGHT = "minecraft:light_gray_concrete"
+SUPPORT_INPUT = "minecraft:red_concrete"
 SUPPORT_IN = "minecraft:light_blue_concrete"
 SUPPORT_OUT = "minecraft:blue_concrete"
+SUPPORT_OUTPUT = "minecraft:green_concrete"
 SUPPORT_CONNECT = "minecraft:purple_concrete"
 TORCH = "minecraft:redstone_torch[lit=true]"
 WIRE = "minecraft:redstone_wire"
@@ -74,22 +76,28 @@ def _glitched_unstackable_items(signal: int, slot_count: int = 27) -> list[str] 
     return None
 
 
-def _place_module(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, barrel_signal: int) -> None:
+def _place_module(
+    schematic: mcschematic.MCSchematic,
+    x: int,
+    y: int,
+    z: int,
+    barrel_signal: int | None,
+) -> None:
     set_block = schematic.setBlock
 
-    set_block((x + 0, y + 0, z + 0), SUPPORT_WEIGHT)
-    set_block((x + 0, y + 1, z + 0), comparator("west"))
-    set_block((x + 1, y + 1, z + 0), SUPPORT_WEIGHT)
+    set_block((x, y, z), SUPPORT_WEIGHT)
+    set_block((x, y + 1, z), comparator("west"))
+    set_block((x + 1, y + 1, z), SUPPORT_WEIGHT)
 
-    set_block((x + 0, y + 0, z + 1), SUPPORT_WEIGHT)
+    set_block((x, y, z + 1), SUPPORT_WEIGHT)
     set_block((x + 1, y + 1, z + 1), SUPPORT_WEIGHT)
 
-    set_block((x + 0, y + 1, z + 2), SUPPORT_IN)
+    set_block((x, y + 1, z + 2), SUPPORT_IN)
     set_block((x + 1, y + 1, z + 2), wall_torch("east"))
 
-    if barrel_signal != 15:
-        set_block((x + 0, y + 1, z + 1), comparator("south"))
-        set_block((x + 0, y + 1, z + 3), _barrel(barrel_signal))
+    if barrel_signal is not None:
+        set_block((x, y + 1, z + 1), comparator("south"))
+        set_block((x, y + 1, z + 3), _barrel(barrel_signal))
 
 
 def _place_barrel(schematic: mcschematic.MCSchematic, x: int, y: int, z: int, signal: int) -> None:
@@ -146,7 +154,7 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
     set_block((x, y - 3, z + 2), SUPPORT_CONNECT)
     set_block((x, y - 2, z + 2), TORCH)
     set_block((x, y - 1, z + 2), SUPPORT_CONNECT)
-    set_block((x, y - 0, z + 2), TORCH)
+    set_block((x, y, z + 2), TORCH)
 
     for i in reversed(range(-1, 6)):
         set_block((x, y - 4, z - i), SUPPORT_CONNECT)
@@ -161,7 +169,6 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
             set_block((x, y - 3, z - i), WIRE)
 
     connector_z = z - 6
-    place_top_block = True
 
     while delay > 0:
         set_block((x, y - 4, connector_z), SUPPORT_CONNECT)
@@ -177,11 +184,43 @@ def _build_connector(schematic: mcschematic.MCSchematic, x: int, y: int, z: int,
 
         connector_z -= 1
 
-    if place_top_block:
-        set_block((x, y - 1, connector_z), SUPPORT_CONNECT)
-
+    set_block((x, y - 1, connector_z), SUPPORT_CONNECT)
     set_block((x, y - 2, connector_z), WIRE)
     set_block((x, y - 3, connector_z), SUPPORT_CONNECT)
+
+
+def _build_input_source(schematic: mcschematic.MCSchematic, input_index: int) -> None:
+    set_block = schematic.setBlock
+    x = input_index * 2
+
+    set_block((x, -3, 2), SUPPORT_INPUT)
+    set_block((x, -2, 2), TORCH)
+    set_block((x, -1, 2), SUPPORT_INPUT)
+    set_block((x, 0, 2), TORCH)
+
+
+def _label_sign(label: int) -> str:
+    return (
+        "minecraft:oak_wall_sign[facing=north,waterlogged=false]{"
+        "back_text:{color:\"black\",has_glowing_text:0b,messages:['','','','']},"
+        f"front_text:{{color:\"black\",has_glowing_text:0b,messages:['{label}','','','']}},"
+        "is_waxed:0b"
+        "}"
+    )
+
+
+def _build_output_segment(
+    schematic: mcschematic.MCSchematic,
+    x: int,
+    y: int,
+    label: int,
+) -> None:
+    set_block = schematic.setBlock
+
+    set_block((x, y, -1), SUPPORT_OUTPUT)
+    set_block((x, y + 1, -1), WIRE)
+    set_block((x, y + 2, -1), SUPPORT_OUTPUT)
+    set_block((x, y, -2), _label_sign(label))
 
 
 def compute_signal_strengths(model: MCNNModel) -> list[tuple[torch.Tensor, torch.Tensor]]:
@@ -203,7 +242,6 @@ def compute_signal_strengths(model: MCNNModel) -> list[tuple[torch.Tensor, torch
             for input_index in range(input_size):
                 weight = int(layer.weight[output_index, input_index].item())
                 if weight == 0:
-                    network_signal = 0
                     network_signals[output_index, input_index] = 0
                     continue
 
@@ -233,6 +271,11 @@ def build_schematic(model: MCNNModel) -> mcschematic.MCSchematic:
         input_size = int(layer.weight.shape[1])
         output_size = int(layer.weight.shape[0])
         is_last_layer = layer_index == last_layer_index
+        is_first_layer = layer_index == 0
+
+        if is_first_layer:
+            for input_index in range(input_size):
+                _build_input_source(schematic, input_index)
 
         bias_signals, network_signals = layer_signal_strengths[layer_index]
 
@@ -241,8 +284,9 @@ def build_schematic(model: MCNNModel) -> mcschematic.MCSchematic:
         for output_index in range(output_size):
             for input_index in range(input_size):
                 weight = int(layer.weight[output_index, input_index].item())
-                if weight == 0:
-                    continue
+                network_signal = None
+                if weight != 0:
+                    network_signal = int(network_signals[output_index, input_index].item())
 
                 module_x = next_layer_x + output_index + input_index * 2
                 module_y = output_index
@@ -252,7 +296,7 @@ def build_schematic(model: MCNNModel) -> mcschematic.MCSchematic:
                     module_x,
                     module_y,
                     0,
-                    int(network_signals[output_index, input_index].item()),
+                    network_signal,
                 )
 
             _place_barrel(
@@ -271,6 +315,13 @@ def build_schematic(model: MCNNModel) -> mcschematic.MCSchematic:
                     0,
                 )
                 delays.append(delay)
+            else:
+                _build_output_segment(
+                    schematic,
+                    next_layer_x + output_index + input_size * 2 - 1,
+                    output_index,
+                    output_index,
+                )
 
         if not is_last_layer and delays:
             max_delay = max(delays)

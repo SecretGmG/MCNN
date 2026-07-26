@@ -1,0 +1,30 @@
+{
+  "dataset": "artifacts/curation/curated_dataset.npz",
+  "seed": 3,
+  "hidden": [
+    64
+  ],
+  "hidden_activation": "binary_step",
+  "validation_fraction": 0.2,
+  "augment": true,
+  "bitflip_variants": 0,
+  "ste_epochs": 50,
+  "ste_learning_rate": 0.008,
+  "ste_early_stop": 10,
+  "signal_penalty_weight": 0.02,
+  "signal_penalty_threshold": 850.0,
+  "signal_penalty_warmup_epochs": 20,
+  "identity_warmup_epochs": 0,
+  "identity_warmup": false,
+  "enable_ablation": false,
+  "enable_evolution": false,
+  "evolution_generations": 10,
+  "evolution_population": 24,
+  "evolution_elites": 4,
+  "evolution_weight_mutations": 24,
+  "evolution_bias_mutations": 4,
+  "evolution_zero_probability": 0.15,
+  "evolution_remove_unit_probability": 0.1,
+  "refinement_max_val_accuracy_drop": 0.0,
+  "export_schematic": true
+}

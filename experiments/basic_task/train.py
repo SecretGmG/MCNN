@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -128,7 +129,7 @@ class RunConfig:
     export_schematic: bool = True
 
 
-def run(cfg: RunConfig) -> None:
+def run(cfg: RunConfig) -> dict[str, object]:
     torch.manual_seed(cfg.seed)
     device = torch.device("cpu")
 
@@ -352,7 +353,74 @@ def run(cfg: RunConfig) -> None:
         print(f"saved schematic={saved}")
 
     print(f"saved run directory: {out}")
+    return summary
+
+
+def _parse_hidden(value: str) -> list[int]:
+    hidden = [int(part) for part in value.split(",") if part.strip()]
+    if not hidden:
+        raise argparse.ArgumentTypeError("hidden must contain at least one layer size")
+    if any(size <= 0 for size in hidden):
+        raise argparse.ArgumentTypeError("hidden layer sizes must be positive")
+    return hidden
+
+
+def parse_args() -> RunConfig:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=int, default=RunConfig.seed)
+    parser.add_argument("--hidden", type=_parse_hidden, default=None, help="Comma-separated hidden sizes.")
+    parser.add_argument("--hidden-activation", default=RunConfig.hidden_activation)
+    parser.add_argument("--validation-fraction", type=float, default=RunConfig.validation_fraction)
+
+    augment = parser.add_mutually_exclusive_group()
+    augment.add_argument("--augment", dest="augment", action="store_true", default=RunConfig.augment)
+    augment.add_argument("--no-augment", dest="augment", action="store_false")
+    parser.add_argument("--bitflip-variants", type=int, default=RunConfig.bitflip_variants)
+
+    parser.add_argument("--ste-epochs", type=int, default=RunConfig.ste_epochs)
+    parser.add_argument("--ste-learning-rate", type=float, default=RunConfig.ste_learning_rate)
+    parser.add_argument("--ste-early-stop", type=int, default=RunConfig.ste_early_stop)
+    parser.add_argument("--signal-penalty-weight", type=float, default=RunConfig.signal_penalty_weight)
+    parser.add_argument("--signal-penalty-threshold", type=float, default=RunConfig.signal_penalty_threshold)
+    parser.add_argument("--signal-penalty-warmup-epochs", type=int, default=RunConfig.signal_penalty_warmup_epochs)
+
+    parser.add_argument("--enable-ablation", action="store_true", default=RunConfig.enable_ablation)
+    parser.add_argument("--enable-evolution", action="store_true", default=RunConfig.enable_evolution)
+    parser.add_argument("--evolution-generations", type=int, default=RunConfig.evolution_generations)
+    parser.add_argument("--evolution-population", type=int, default=RunConfig.evolution_population)
+    parser.add_argument("--evolution-elites", type=int, default=RunConfig.evolution_elites)
+    parser.add_argument("--evolution-weight-mutations", type=int, default=RunConfig.evolution_weight_mutations)
+    parser.add_argument("--evolution-bias-mutations", type=int, default=RunConfig.evolution_bias_mutations)
+    parser.add_argument("--evolution-zero-probability", type=float, default=RunConfig.evolution_zero_probability)
+    parser.add_argument(
+        "--evolution-remove-unit-probability",
+        type=float,
+        default=RunConfig.evolution_remove_unit_probability,
+    )
+    parser.add_argument(
+        "--refinement-max-val-accuracy-drop",
+        type=float,
+        default=RunConfig.refinement_max_val_accuracy_drop,
+    )
+
+    parser.add_argument("--output-dir", default=RunConfig.output_dir)
+    schematic = parser.add_mutually_exclusive_group()
+    schematic.add_argument(
+        "--export-schematic",
+        dest="export_schematic",
+        action="store_true",
+        default=RunConfig.export_schematic,
+    )
+    schematic.add_argument("--no-export-schematic", dest="export_schematic", action="store_false")
+
+    args = parser.parse_args()
+    cfg = RunConfig()
+    for key, value in vars(args).items():
+        if value is None:
+            continue
+        setattr(cfg, key, value)
+    return cfg
 
 
 if __name__ == "__main__":
-    run(RunConfig())
+    run(parse_args())
