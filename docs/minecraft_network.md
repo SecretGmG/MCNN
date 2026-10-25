@@ -75,12 +75,19 @@ For diagonal `d`, input value `i` is connected to output neuron
 matrix diagonal, in the next two-block slice. The unshifted diagonal `d = 0` is
 the final destination, not the first.
 
-The uppermost and lowermost neuron pairs use the orange-supported endpoint
-routes when the stream wraps. The orange blocks are structural and add no
-redstone delay themselves. Each endpoint route contains the same three delayed
-comparator stages as the ordinary route. At the wrap it advances the temporal
-phase, producing the `... n - 4, 1 ...`, `... n - 3, 2 ...` transitions above
-without a bubble in the two-RT stream.
+The corrected wrap route reinserts the value one two-block neuron pair higher
+than the original prototype did. Consequently, the lowest pair feeds the
+topmost pair instead of skipping it. Three relay comparators lie between the
+source loop's output and the receiving loop's input. The first comparator in
+the receiving loop is part of that loop, not a fourth transport stage.
+
+The colored concrete in the prototype is assembly notation, not a timing
+element. In particular, the endpoint-only orange supports are retained in the
+lowest and highest four-block modules and removed from interior copies. The
+corrected endpoint route has the same three-RT transport delay as the ordinary
+route. At the wrap it advances the temporal phase, producing the
+`... n - 4, 1 ...`, `... n - 3, 2 ...` transitions above without a bubble in
+the two-RT stream.
 
 Stopping the shifter early retains a prefix of this cyclic-diagonal order. The
 current Python configuration is aligned to eight-neuron modules: a
@@ -103,14 +110,13 @@ and the activation-subtraction ROM.
 ## Exact timing
 
 One redstone tick (RT) is two game ticks, or `0.1 s`. The timing below was
-audited against `nn(2).schem` (SHA-256
-`a5b5fabf65f0540846fcabdc9c3928e91b98fb7c64f00d37618d565a6084843c`).
+audited against the corrected `nn(3).schem` (SHA-256
+`db9f188df32ea8790df19b2c92224323b92e7c26f70eb7129a7af7e91a4b5f26`).
 It assumes the Java redstone delays represented by the schematic block states.
 
 The barrel shifter has a three-RT longest data path. This includes the three
-comparator stages on the orange-supported endpoint route; those stages balance
-the corresponding ordinary route. Its four temporal slots remain two RT apart,
-so the slots of one cell reach the destination at:
+relay comparator stages on the corrected endpoint route. Its four temporal
+slots remain two RT apart, so the slots of one cell reach the destination at:
 
 ```text
 slot 0    slot 1    slot 2    slot 3
@@ -120,9 +126,25 @@ slot 0    slot 1    slot 2    slot 3
 The fourth slot is visible at absolute time `t = 9 RT` because the whole stream
 has a fixed three-RT pipeline latency. The handoff itself nevertheless occupies
 exactly eight RT (`0.8 s`), measured from the start of one four-slot cell to the
-start of the next. The two height lanes run in parallel. Two four-RT repeaters
-in the control path produce this eight-RT transfer window. The shifter's slot
+start of the next. The two height lanes run in parallel. The shifter's slot
 initiation interval remains two RT (`0.2 s`).
+
+## Controller state
+
+The prototype has one button for initialization. Its immediate branch and a
+branch delayed by two four-RT repeaters drive a subtract comparator, producing
+an eight-RT-wide reset window. That window resets both the signed weight-sum
+buffer and the activation-count buffer. The copper-bulb/observer section turns
+the relevant transition into a short event used to initiate insertion into the
+barrel shifter. The extra two-RT repeater belongs to this event/latch control;
+it does not add to every streamed value's shifter latency.
+
+The data controller is not complete in `nn(3).schem`. It still needs scheduled
+sources for input activations, hexadecimal weight words, and activation
+thresholds. The control that starts evaluation of the populated activation
+buffer is also absent. The latency equations below describe the compute and
+shifter schedule once those streams are supplied; they are not yet a measured
+button-to-result latency for a complete controller.
 
 For layer `l`, define:
 
