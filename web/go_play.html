@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft 7x7 Go</title>
+  <style>
+    :root { color: #172217; background: #edf2e7; font-family: Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    main { width: min(100%, 720px); }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 26px; font-weight: 700; }
+    #status { font-weight: 700; color: #37603b; }
+    .play-area { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 28px; align-items: center; }
+    .board-wrap { position: relative; width: min(100%, 520px); aspect-ratio: 1; padding: 7.2%; background: #c8934f; box-shadow: 0 2px 12px #27311d33; }
+    #board { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(7, 1fr); width: 100%; height: 100%; }
+    #board::before { content: ""; position: absolute; inset: calc(100% / 14); pointer-events: none; border: 1px solid #4e3520; background-image: linear-gradient(#4e3520 1px, transparent 1px), linear-gradient(90deg, #4e3520 1px, transparent 1px); background-size: calc(100% / 6) calc(100% / 6); }
+    .point { position: relative; z-index: 1; border: 0; padding: 0; background: transparent; cursor: pointer; }
+    .point:focus-visible { outline: 3px solid #d64b38; outline-offset: -3px; z-index: 2; }
+    .point:disabled { cursor: default; }
+    .stone { position: absolute; inset: 10%; border-radius: 50%; box-shadow: inset -3px -4px 5px #0005, 1px 2px 3px #0006; }
+    .black { background: #202421; }
+    .white { background: #f4f4eb; }
+    .last::after { content: ""; position: absolute; width: 19%; height: 19%; top: 40.5%; left: 40.5%; border-radius: 50%; background: #d84b37; box-shadow: 0 0 0 1px #fff8; }
+    aside { min-width: 0; }
+    .scores { display: grid; gap: 8px; margin: 0 0 22px; }
+    .score { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #b8c4b1; padding: 6px 0; font-size: 18px; }
+    .label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .sample { width: 14px; height: 14px; display: inline-block; border-radius: 50%; }
+    .sample.black { background: #202421; } .sample.white { background: #f4f4eb; border: 1px solid #899089; }
+    .commands { display: grid; gap: 8px; }
+    button.command { min-height: 38px; border: 1px solid #547150; background: #f8faf5; color: #233525; font-weight: 700; cursor: pointer; }
+    button.command:hover { background: #dce9d7; } button.command:disabled { opacity: .45; cursor: default; }
+    @media (max-width: 560px) { body { padding: 16px; } .play-area { grid-template-columns: 1fr; gap: 18px; } .board-wrap { margin: auto; } aside { display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; align-items: start; } .scores { margin: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1>Minecraft 7x7 Go</h1><span id="status">Loading</span></header>
+    <section class="play-area" aria-label="Go game">
+      <div class="board-wrap"><div id="board" role="grid" aria-label="Go board"></div></div>
+      <aside>
+        <div class="scores">
+          <div class="score"><span class="label"><i class="sample black"></i>You</span><strong id="black-score">0</strong></div>
+          <div class="score"><span class="label"><i class="sample white"></i>Model</span><strong id="white-score">0</strong></div>
+        </div>
+        <div class="commands">
+          <button class="command" id="pass">Pass</button>
+          <button class="command" id="undo">Undo</button>
+          <button class="command" id="new-game">New game</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const board = document.querySelector('#board');
+    const status = document.querySelector('#status');
+    const blackScore = document.querySelector('#black-score');
+    const whiteScore = document.querySelector('#white-score');
+    const pass = document.querySelector('#pass');
+    const undo = document.querySelector('#undo');
+    let state = null;
+    let busy = false;
+
+    async function request(url, body) {
+      const response = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Request failed');
+      return payload;
+    }
+    function render() {
+      board.replaceChildren();
+      blackScore.textContent = state.score.black;
+      whiteScore.textContent = state.score.white;
+      status.textContent = busy ? 'Model thinking' : state.status;
+      const humanTurn = state.to_play === 1 && !state.finished && !busy;
+      for (let point = 0; point < 49; point += 1) {
+        const cell = document.createElement('button');
+        cell.className = 'point'; cell.setAttribute('role', 'gridcell');
+        cell.disabled = !humanTurn || !state.legal[point];
+        const row = Math.floor(point / 7); const col = point % 7;
+        cell.setAttribute('aria-label', `${String.fromCharCode(65 + col)}${7 - row}`);
+        if (state.board[row][col] !== 0) {
+          const stone = document.createElement('span');
+          stone.className = `stone ${state.board[row][col] === 1 ? 'black' : 'white'}${state.last_move === point ? ' last' : ''}`;
+          cell.append(stone);
+        }
+        cell.addEventListener('click', () => play(point));
+        board.append(cell);
+      }
+      pass.disabled = !humanTurn || !state.legal[49];
+      undo.disabled = busy || state.moves.length === 0;
+    }
+    async function play(move) {
+      if (busy) return;
+      busy = true; status.textContent = 'Model thinking'; render();
+      try { state = await request('/api/play', { moves: state.moves, move }); }
+      catch (error) { status.textContent = error.message; }
+      finally { busy = false; render(); }
+    }
+    document.querySelector('#pass').addEventListener('click', () => play(49));
+    document.querySelector('#undo').addEventListener('click', async () => {
+      if (busy || !state.moves.length) return;
+      state = await request('/api/state', { moves: state.moves.slice(0, Math.max(0, state.moves.length - 2)) }); render();
+    });
+    document.querySelector('#new-game').addEventListener('click', async () => { if (!busy) { state = await request('/api/new'); render(); } });
+    request('/api/new').then(value => { state = value; render(); }).catch(error => { status.textContent = error.message; });
+  </script>
+</body>
+</html>

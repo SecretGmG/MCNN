@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from mcnn import MCNNModel, cap_bias_signals, quantize_model, remove_hidden_unit
+from mcnn import MCNNModel, cap_bias_signals, physicality_metrics, quantize_model, remove_hidden_unit
 
 
 class ModelPipelineTest(unittest.TestCase):
@@ -33,6 +33,24 @@ class ModelPipelineTest(unittest.TestCase):
         y = model(x, mode="exact")
         expected = torch.tensor([[5.0], [3.0]])
         self.assertTrue(torch.equal(y, expected))
+
+    def test_temperature_surrogate_keeps_binary_forward_exact(self) -> None:
+        model = MCNNModel.from_discrete_layers(
+            [
+                {
+                    "weight": torch.tensor([[1]], dtype=torch.int16),
+                    "bias": torch.tensor([0], dtype=torch.int16),
+                    "activation": "binary_step",
+                    "output_min": 0,
+                    "output_max": 1,
+                }
+            ],
+            bias_min=0.0,
+        )
+        x = torch.tensor([[1.0], [-1.0]])
+        model.set_binary_surrogate_temperature_(6.0)
+        self.assertTrue(torch.equal(model(x, mode="ste"), torch.tensor([[1.0], [0.0]])))
+        self.assertTrue(torch.equal(model(x, mode="exact"), torch.tensor([[1.0], [0.0]])))
 
     def test_quantize_model_produces_integer_snapshot(self) -> None:
         model = MCNNModel([2, 2], hidden_activation="bounded_integer", output_activation="bounded_integer")
@@ -87,6 +105,26 @@ class ModelPipelineTest(unittest.TestCase):
         capped, edits = cap_bias_signals(model)
         self.assertGreater(edits, 0)
         self.assertLessEqual(capped.max_bias_signal_strength(), 897)
+
+    def test_physicality_metrics_report_exact_module_and_signal_cost(self) -> None:
+        model = MCNNModel.from_discrete_layers(
+            [
+                {
+                    "weight": torch.tensor([[1, 0], [-2, 3]], dtype=torch.int16),
+                    "bias": torch.tensor([2, 4], dtype=torch.int16),
+                    "activation": "bounded_integer",
+                    "output_min": 0,
+                    "output_max": 15,
+                }
+            ],
+            bias_min=0.0,
+        )
+
+        metrics = physicality_metrics(model, signal_target=20)
+        self.assertEqual(metrics["total_weight_slots"], 4)
+        self.assertEqual(metrics["active_weight_modules"], 3)
+        self.assertEqual(metrics["max_signal"], 34)
+        self.assertEqual(metrics["signal_headroom"], 863)
 
 
 if __name__ == "__main__":

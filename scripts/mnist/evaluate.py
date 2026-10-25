@@ -7,9 +7,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib
+from scripts.common.plotting import configure_matplotlib
 
-matplotlib.use("Agg")
+configure_matplotlib()
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -432,6 +433,91 @@ def save_accuracy_history_plot(
     return True
 
 
+def save_physicality_history_plot(summary: dict[str, object], path: Path) -> bool:
+    history = summary.get("history")
+    if not isinstance(history, dict):
+        return False
+    required = ["epoch", "active_weight_modules", "max_signal"]
+    if any(name not in history for name in required):
+        return False
+
+    epochs = _epochs(history)
+    modules = _series(history, "active_weight_modules")
+    max_signal = _series(history, "max_signal")
+    fig, ax = plt.subplots(figsize=(9.5, 4.5))
+    ax.plot(epochs, modules, color="#4c72b0", marker="o", linewidth=1.6, label="Active weight modules")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Active weight modules")
+    ax.grid(True, axis="y", alpha=0.25)
+
+    signal_ax = ax.twinx()
+    signal_ax.plot(epochs, max_signal, color="#b45f06", marker="s", linewidth=1.4, label="Maximum signal")
+    signal_ax.set_ylabel("Maximum barrel signal")
+    signal_ax.axhline(897, color="#7f7f7f", linestyle=":", linewidth=1, label="Export limit")
+
+    lines, labels = ax.get_legend_handles_labels()
+    signal_lines, signal_labels = signal_ax.get_legend_handles_labels()
+    ax.legend(lines + signal_lines, labels + signal_labels, loc="best")
+    ax.set_title("Physicality During Training")
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return True
+
+
+def save_annealing_history_plot(summary: dict[str, object], path: Path) -> bool:
+    history = summary.get("history")
+    if not isinstance(history, dict):
+        return False
+    required = [
+        "epoch",
+        "exportable_val_accuracy",
+        "shifted_val_accuracy",
+        "surrogate_temperature",
+        "integer_attraction_weight",
+    ]
+    if any(name not in history for name in required):
+        return False
+
+    epochs = _epochs(history)
+    val_accuracy = _series(history, "exportable_val_accuracy")
+    shifted_accuracy = _series(history, "shifted_val_accuracy")
+    temperature = _series(history, "surrogate_temperature")
+    integer_weight = _series(history, "integer_attraction_weight")
+
+    fig, (performance_ax, schedule_ax) = plt.subplots(2, 1, figsize=(9.5, 6.5), sharex=True)
+    performance_ax.plot(epochs, val_accuracy, marker="o", linewidth=1.7, label="Centered validation")
+    performance_ax.plot(epochs, shifted_accuracy, marker="s", linewidth=1.5, label="Shifted validation")
+    performance_ax.set_ylabel("Exact accuracy")
+    performance_ax.set_ylim(0.0, 1.05)
+    performance_ax.grid(True, axis="y", alpha=0.25)
+    performance_ax.legend(loc="lower right")
+    performance_ax.set_title("Annealing Schedule and Exportable Model Performance")
+
+    schedule_ax.plot(epochs, temperature, color="#b45f06", linewidth=1.8, label="Surrogate temperature")
+    schedule_ax.set_xlabel("Epoch")
+    schedule_ax.set_ylabel("Temperature")
+    schedule_ax.grid(True, axis="y", alpha=0.25)
+    integer_ax = schedule_ax.twinx()
+    integer_ax.plot(
+        epochs,
+        integer_weight,
+        color="#6a4c93",
+        linestyle="--",
+        linewidth=1.6,
+        label="Integer attraction weight",
+    )
+    integer_ax.set_ylabel("Integer attraction weight")
+    lines, labels = schedule_ax.get_legend_handles_labels()
+    integer_lines, integer_labels = integer_ax.get_legend_handles_labels()
+    schedule_ax.legend(lines + integer_lines, labels + integer_labels, loc="upper left")
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return True
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
@@ -477,6 +563,14 @@ def main() -> None:
         config,
         plots_dir / "accuracy_history.png",
     )
+    saved_physicality_history = save_physicality_history_plot(
+        summary,
+        plots_dir / "physicality_history.png",
+    )
+    saved_annealing_history = save_annealing_history_plot(
+        summary,
+        plots_dir / "annealing_history.png",
+    )
 
     with open(args.run_dir / "evaluation.json", "w") as f:
         json.dump(evaluation.to_summary(), f, indent=2)
@@ -496,6 +590,10 @@ def main() -> None:
         print(f"saved {plots_dir / 'accuracy_history.png'}")
     else:
         print(f"skipped accuracy history plot; no training history found in {args.run_dir / 'summary.json'}")
+    if saved_physicality_history:
+        print(f"saved {plots_dir / 'physicality_history.png'}")
+    if saved_annealing_history:
+        print(f"saved {plots_dir / 'annealing_history.png'}")
     print(f"saved {args.run_dir / 'evaluation.json'}")
 
 

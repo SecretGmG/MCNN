@@ -18,8 +18,10 @@ from mcnn import (
     cap_bias_signals,
     evaluate_model,
     evolutionary_refine,
+    physicality_metrics,
     quantize_model,
     save_schematic,
+    selection_score,
     train_classic,
     validate_export_signals,
 )
@@ -51,7 +53,7 @@ def load_curated_dataset(
     seed: int,
     augment: bool,
     bitflip_variants: int,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
+) -> tuple[DataLoader, DataLoader, DataLoader, DataLoader]:
     data = np.load(dataset_path)
     x_all = data["x"].astype(np.float32)
     y_all = data["y"].astype(np.int64)
@@ -97,9 +99,23 @@ def load_curated_dataset(
         TensorDataset(torch.tensor(val_x, dtype=torch.float32), torch.tensor(val_y, dtype=torch.long)),
         batch_size=128,
     )
+    shifted_val_x: list[np.ndarray] = []
+    shifted_val_y: list[int] = []
+    for image, label in zip(val_x, val_y, strict=True):
+        image_2d = image.reshape(8, 8)
+        for dy, dx in _valid_shifts(image_2d):
+            shifted_val_x.append(np.roll(image_2d, (dy, dx), axis=(0, 1)).flatten())
+            shifted_val_y.append(int(label))
+    shifted_val_loader = DataLoader(
+        TensorDataset(
+            torch.tensor(np.stack(shifted_val_x), dtype=torch.float32),
+            torch.tensor(shifted_val_y, dtype=torch.long),
+        ),
+        batch_size=256,
+    )
     train_loader = DataLoader(TensorDataset(train_x_t, train_y_t), batch_size=128, shuffle=True)
 
-    return train_loader, val_loader, raw_loader
+    return train_loader, val_loader, shifted_val_loader, raw_loader
 
 
 @dataclass
@@ -108,6 +124,7 @@ class RunConfig:
     seed: int = 3
     hidden: list[int] = field(default_factory=lambda: [64])
     hidden_activation: str = "binary_step"
+    initial_weight_std: float = 0.5
 
     validation_fraction: float = 0.2
     augment: bool = False
@@ -119,6 +136,18 @@ class RunConfig:
     signal_penalty_weight: float = 0.05
     signal_penalty_threshold: float = 800.0
     signal_penalty_warmup_epochs: int = 20
+    weight_magnitude_penalty: float = 0.0
+    selection_shifted_accuracy_weight: float = 0.0
+    selection_signal_excess_weight: float = 0.0
+    selection_active_weight_weight: float = 0.0
+    selection_active_weight_scale: float = 5000.0
+    surrogate_temperature_start: float | None = None
+    surrogate_temperature_end: float | None = None
+    surrogate_temperature_anneal_epochs: int = 0
+    integer_attraction_start_weight: float = 0.0
+    integer_attraction_end_weight: float = 0.0
+    integer_attraction_start_epoch: int = 1
+    integer_attraction_anneal_epochs: int = 0
     identity_warmup_epochs: int = 0
     identity_warmup: bool = False
 
@@ -174,7 +203,7 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
 
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    train_loader, val_loader, raw_loader = load_curated_dataset(
+    train_loader, val_loader, shifted_val_loader, raw_loader = load_curated_dataset(
         dataset_path=Path(cfg.dataset),
         validation_fraction=cfg.validation_fraction,
         seed=cfg.seed,
@@ -191,6 +220,7 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         weight_min=-15,
         weight_max=15,
         bias_min=-1024.0,
+        initial_weight_std=cfg.initial_weight_std,
     ).to(device)
     identity_layers = initialize_identity_layers(model) if cfg.identity_warmup else ()
 
@@ -209,12 +239,31 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         signal_penalty_weight=cfg.signal_penalty_weight,
         signal_penalty_threshold=cfg.signal_penalty_threshold,
         signal_penalty_warmup_epochs=cfg.signal_penalty_warmup_epochs,
+        weight_magnitude_penalty=cfg.weight_magnitude_penalty,
+        selection_shifted_accuracy_weight=cfg.selection_shifted_accuracy_weight,
+        selection_signal_excess_weight=cfg.selection_signal_excess_weight,
+        selection_active_weight_weight=cfg.selection_active_weight_weight,
+        selection_active_weight_scale=cfg.selection_active_weight_scale,
+        surrogate_temperature_start=cfg.surrogate_temperature_start,
+        surrogate_temperature_end=cfg.surrogate_temperature_end,
+        surrogate_temperature_anneal_epochs=cfg.surrogate_temperature_anneal_epochs,
+        integer_attraction_start_weight=cfg.integer_attraction_start_weight,
+        integer_attraction_end_weight=cfg.integer_attraction_end_weight,
+        integer_attraction_start_epoch=cfg.integer_attraction_start_epoch,
+        integer_attraction_anneal_epochs=cfg.integer_attraction_anneal_epochs,
         identity_warmup_epochs=cfg.identity_warmup_epochs,
         identity_warmup_layer_indices=identity_layers,
     )
 
     print("\n[1/5] Classic training")
-    train_stats = train_classic(model, train_loader, val_loader, device, pipeline)
+    train_stats = train_classic(
+        model,
+        train_loader,
+        val_loader,
+        device,
+        pipeline,
+        shifted_val_loader=shifted_val_loader,
+    )
 
     print("\n[2/5] Quantization")
     quantized_only = quantize_model(model)
@@ -262,6 +311,16 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         target_max=pipeline.target_max,
         margin=pipeline.margin,
     )
+    _q_capped_shifted_loss, q_capped_shifted_acc = evaluate_model(
+        quantized,
+        shifted_val_loader,
+        device,
+        mode="exact",
+        loss_name=pipeline.loss,
+        target_min=pipeline.target_min,
+        target_max=pipeline.target_max,
+        margin=pipeline.margin,
+    )
 
     print("\n[3/5] Ablation")
     if cfg.enable_ablation:
@@ -283,7 +342,7 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
 
     print("\n[4/5] Evolutionary refinement")
     if cfg.enable_evolution and cfg.evolution_generations > 0:
-        candidate, evo_metrics = evolutionary_refine(ablated, raw_loader, device, pipeline)
+        candidate, evo_metrics = evolutionary_refine(ablated, shifted_val_loader, device, pipeline)
         candidate, final_bias_edits = cap_bias_signals(candidate)
         candidate_signal_check = validate_export_signals(candidate)
         _cand_val_loss, cand_val_acc = evaluate_model(
@@ -296,22 +355,46 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
             target_max=pipeline.target_max,
             margin=pipeline.margin,
         )
+        _cand_shifted_loss, cand_shifted_acc = evaluate_model(
+            candidate,
+            shifted_val_loader,
+            device,
+            mode="exact",
+            loss_name=pipeline.loss,
+            target_min=pipeline.target_min,
+            target_max=pipeline.target_max,
+            margin=pipeline.margin,
+        )
 
-        min_allowed = q_capped_val_acc - cfg.refinement_max_val_accuracy_drop
-        accepted = cand_val_acc >= min_allowed
+        baseline_score, _baseline_physicality = selection_score(
+            q_capped_val_acc,
+            q_capped_shifted_acc,
+            quantized,
+            pipeline,
+        )
+        candidate_score, _candidate_physicality = selection_score(
+            cand_val_acc,
+            cand_shifted_acc,
+            candidate,
+            pipeline,
+        )
+        min_allowed = baseline_score - cfg.refinement_max_val_accuracy_drop
+        accepted = candidate_score >= min_allowed
         if accepted:
             evolved = candidate
-            print(f"evolution accepted: val_acc {q_capped_val_acc:.3f} -> {cand_val_acc:.3f}")
+            print(f"evolution accepted: score {baseline_score:.3f} -> {candidate_score:.3f}")
         else:
             evolved = quantized
             print(
-                f"evolution rejected by accuracy floor: baseline={q_capped_val_acc:.3f}, "
-                f"candidate={cand_val_acc:.3f}, min_allowed={min_allowed:.3f}"
+                f"evolution rejected by score floor: baseline={baseline_score:.3f}, "
+                f"candidate={candidate_score:.3f}, min_allowed={min_allowed:.3f}"
             )
 
         evolution_stats = {
             "score": float(evo_metrics["score"]),
             "accuracy": float(cand_val_acc),
+            "shifted_accuracy": float(cand_shifted_acc),
+            "selection_score": float(candidate_score),
             "enabled": True,
             "accepted": bool(accepted),
             "post_evolution_bias_edits": int(final_bias_edits),
@@ -342,6 +425,16 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         target_max=pipeline.target_max,
         margin=pipeline.margin,
     )
+    shifted_val_loss, shifted_val_acc = evaluate_model(
+        evolved,
+        shifted_val_loader,
+        device,
+        mode="exact",
+        loss_name=pipeline.loss,
+        target_min=pipeline.target_min,
+        target_max=pipeline.target_max,
+        margin=pipeline.margin,
+    )
 
     final_signal_check = validate_export_signals(evolved)
     if not bool(final_signal_check["ok"]):
@@ -357,11 +450,13 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         "best_epoch": train_stats["best_epoch"],
         "best_val_accuracy": train_stats["best_val_accuracy"],
         "best_exportable_val_accuracy": train_stats["best_exportable_val_accuracy"],
+        "best_selection_score": train_stats["best_selection_score"],
         "history": train_stats["history"],
         "post_quantization_only_train": {"loss": q_only_train_loss, "accuracy": q_only_train_acc},
         "post_quantization_only_val": {"loss": q_only_val_loss, "accuracy": q_only_val_acc},
         "post_quantization_capped_train": {"loss": q_capped_train_loss, "accuracy": q_capped_train_acc},
         "post_quantization_capped_val": {"loss": q_capped_val_loss, "accuracy": q_capped_val_acc},
+        "post_quantization_capped_shifted_val": {"accuracy": q_capped_shifted_acc},
         "post_quantization_signal_check": quantized_signal_check,
         "ablation": ablation_stats,
         "evolution": evolution_stats,
@@ -371,9 +466,14 @@ def run(cfg: RunConfig, run_dir: Path) -> dict[str, object]:
         "max_bias_signal": int(evolved.max_bias_signal_strength()),
         "final_signal_check": final_signal_check,
         "layer_sizes": evolved.layer_sizes(),
+        "shifted_val": {"loss": shifted_val_loss, "accuracy": shifted_val_acc},
+        "physicality": physicality_metrics(
+            evolved,
+            signal_target=cfg.signal_penalty_threshold,
+        ),
     }
 
-    print(f"final train_acc={train_acc:.3f} val_acc={val_acc:.3f}")
+    print(f"final train_acc={train_acc:.3f} val_acc={val_acc:.3f} shifted_val={shifted_val_acc:.3f}")
     print(f"nonzero_weights={summary['nonzero_weights']} max_bias_signal={summary['max_bias_signal']}")
     print(f"layer_sizes={summary['layer_sizes']}")
 

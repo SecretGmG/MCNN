@@ -48,6 +48,8 @@ class MCNNModel(nn.Module):
         weight_min: int = -15,
         weight_max: int = 15,
         bias_min: float = 1.0,
+        initial_weight_std: float = 0.5,
+        binary_surrogate_temperature: float | None = None,
     ) -> None:
         super().__init__()
         if len(sizes) < 2:
@@ -56,6 +58,8 @@ class MCNNModel(nn.Module):
         self.weight_min = int(weight_min)
         self.weight_max = int(weight_max)
         self.bias_min = float(bias_min)
+        self.initial_weight_std = float(initial_weight_std)
+        self.binary_surrogate_temperature = binary_surrogate_temperature
 
         self.layer_activations: list[str] = []
         self.layer_output_mins: list[float] = []
@@ -82,7 +86,7 @@ class MCNNModel(nn.Module):
 
     def reset_parameters(self) -> None:
         for weight, bias in zip(self.weights, self.biases, strict=True):
-            nn.init.normal_(weight, mean=0.0, std=0.5)
+            nn.init.normal_(weight, mean=0.0, std=self.initial_weight_std)
             nn.init.constant_(bias, 1.0)
 
     def _quantized_weight(self, layer_index: int, *, ste: bool) -> Tensor:
@@ -99,7 +103,13 @@ class MCNNModel(nn.Module):
         activation = self.layer_activations[layer_index]
         if activation == "binary_step":
             discrete = (x > 0).to(x.dtype)
-            return _ste(discrete, x) if ste else discrete
+            if not ste or self.binary_surrogate_temperature is None:
+                return _ste(discrete, x) if ste else discrete
+            temperature = self.binary_surrogate_temperature
+            if temperature <= 0:
+                raise ValueError("binary surrogate temperature must be positive")
+            surrogate = torch.sigmoid(temperature * x)
+            return surrogate + (discrete - surrogate).detach()
         if activation == "bounded_integer":
             return _bounded_integer(
                 x,
@@ -123,6 +133,12 @@ class MCNNModel(nn.Module):
 
     def clone(self) -> "MCNNModel":
         return deepcopy(self)
+
+    def set_binary_surrogate_temperature_(self, temperature: float | None) -> "MCNNModel":
+        if temperature is not None and temperature <= 0:
+            raise ValueError("binary surrogate temperature must be positive")
+        self.binary_surrogate_temperature = temperature
+        return self
 
     # ------------------------------------------------------------------
     # Discrete snapshots / serialization

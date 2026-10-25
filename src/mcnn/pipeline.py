@@ -38,6 +38,18 @@ class PipelineConfig:
     signal_penalty_weight: float = 0.05
     signal_penalty_threshold: float = 800.0
     signal_penalty_warmup_epochs: int = 20
+    weight_magnitude_penalty: float = 0.0
+    selection_shifted_accuracy_weight: float = 0.0
+    selection_signal_excess_weight: float = 0.0
+    selection_active_weight_weight: float = 0.0
+    selection_active_weight_scale: float = 5000.0
+    surrogate_temperature_start: float | None = None
+    surrogate_temperature_end: float | None = None
+    surrogate_temperature_anneal_epochs: int = 0
+    integer_attraction_start_weight: float = 0.0
+    integer_attraction_end_weight: float = 0.0
+    integer_attraction_start_epoch: int = 1
+    integer_attraction_anneal_epochs: int = 0
     identity_warmup_epochs: int = 0
     identity_warmup_layer_indices: tuple[int, ...] = ()
     seed: int = 1
@@ -142,6 +154,97 @@ def _export_signal_penalty(model: MCNNModel, threshold: float) -> Tensor:
     return torch.stack(penalties).sum()
 
 
+def _weight_magnitude_penalty(model: MCNNModel) -> Tensor:
+    """Encourage exact-zero weights without changing the discrete forward path."""
+    penalties = [
+        model._quantized_weight(layer_index, ste=True).abs().mean()
+        for layer_index in range(len(model.weights))
+    ]
+    if not penalties:
+        return torch.zeros((), device=next(model.parameters()).device)
+    return torch.stack(penalties).mean()
+
+
+def _integer_attraction_penalty(model: MCNNModel) -> Tensor:
+    """Periodic penalty whose minima are exactly the integer lattice."""
+    parameters = [*model.weights, *model.biases]
+    penalties = [torch.sin(torch.pi * parameter).square().mean() for parameter in parameters]
+    if not penalties:
+        return torch.zeros((), device=next(model.parameters()).device)
+    return torch.stack(penalties).mean()
+
+
+def _linear_anneal(start: float, end: float, progress: float) -> float:
+    return start + (end - start) * min(1.0, max(0.0, progress))
+
+
+def _surrogate_temperature(config: PipelineConfig, epoch: int) -> float | None:
+    if config.surrogate_temperature_start is None:
+        return None
+    end = config.surrogate_temperature_end or config.surrogate_temperature_start
+    if config.surrogate_temperature_anneal_epochs <= 1:
+        return end
+    progress = (epoch - 1) / (config.surrogate_temperature_anneal_epochs - 1)
+    return _linear_anneal(config.surrogate_temperature_start, end, progress)
+
+
+def _integer_attraction_weight(config: PipelineConfig, epoch: int) -> float:
+    if epoch < config.integer_attraction_start_epoch:
+        return 0.0
+    if config.integer_attraction_anneal_epochs <= 1:
+        return config.integer_attraction_end_weight
+    progress = (epoch - config.integer_attraction_start_epoch) / (
+        config.integer_attraction_anneal_epochs - 1
+    )
+    return _linear_anneal(
+        config.integer_attraction_start_weight,
+        config.integer_attraction_end_weight,
+        progress,
+    )
+
+
+def physicality_metrics(model: MCNNModel, *, signal_target: float) -> dict[str, float | int]:
+    """Return exact export-relevant cost measurements for a discrete model."""
+    layers = model.discrete_layers()
+    total_weight_slots = sum(int(layer.weight.numel()) for layer in layers)
+    active_weight_modules = sum(int(layer.weight.count_nonzero().item()) for layer in layers)
+    signals = [
+        int(signal)
+        for bias_signals, _network_signals in compute_signal_strengths(model)
+        for signal in bias_signals.tolist()
+    ]
+    max_signal = max(signals, default=0)
+    signal_excess = sum(max(0.0, signal - signal_target) for signal in signals)
+    return {
+        "total_weight_slots": total_weight_slots,
+        "active_weight_modules": active_weight_modules,
+        "active_weight_fraction": active_weight_modules / max(1, total_weight_slots),
+        "max_signal": max_signal,
+        "signal_headroom": MAX_SIGNAL_STRENGTH - max_signal,
+        "signal_excess": signal_excess,
+    }
+
+
+def selection_score(
+    centered_accuracy: float,
+    shifted_accuracy: float | None,
+    model: MCNNModel,
+    config: PipelineConfig,
+) -> tuple[float, dict[str, float | int]]:
+    """Score an exportable model by deployment quality and physical cost."""
+    shifted_weight = config.selection_shifted_accuracy_weight if shifted_accuracy is not None else 0.0
+    quality = (1.0 - shifted_weight) * centered_accuracy + shifted_weight * (shifted_accuracy or 0.0)
+    metrics = physicality_metrics(model, signal_target=config.signal_penalty_threshold)
+    score = quality
+    score -= config.selection_signal_excess_weight * float(metrics["signal_excess"]) / max(
+        1, MAX_SIGNAL_STRENGTH
+    )
+    score -= config.selection_active_weight_weight * float(metrics["active_weight_modules"]) / max(
+        1.0, config.selection_active_weight_scale
+    )
+    return score, metrics
+
+
 def validate_export_signals(
     model: MCNNModel,
     *,
@@ -177,9 +280,11 @@ def train_classic(
     val_loader: DataLoader,
     device: torch.device,
     config: PipelineConfig,
+    shifted_val_loader: DataLoader | None = None,
 ) -> dict[str, object]:
     optimizer = torch.optim.Adam(model.parameters(), lr=config.ste_learning_rate)
     best_state = copy.deepcopy(model.state_dict())
+    best_selection_score = float("-inf")
     best_exportable_acc = float("-inf")
     best_raw_acc = float("-inf")
     best_epoch = 0
@@ -190,8 +295,17 @@ def train_classic(
     history_val_accuracy: list[float] = []
     history_exportable_train_accuracy: list[float] = []
     history_exportable_val_accuracy: list[float] = []
+    history_shifted_val_accuracy: list[float] = []
+    history_selection_score: list[float] = []
+    history_active_weight_modules: list[int] = []
+    history_max_signal: list[int] = []
+    history_surrogate_temperature: list[float] = []
+    history_integer_attraction_weight: list[float] = []
 
     for epoch in range(1, config.ste_epochs + 1):
+        temperature = _surrogate_temperature(config, epoch)
+        model.set_binary_surrogate_temperature_(temperature)
+        integer_weight = _integer_attraction_weight(config, epoch)
         warmup_active = epoch <= config.identity_warmup_epochs
         for layer_index in config.identity_warmup_layer_indices:
             model.weights[layer_index].requires_grad_(not warmup_active)
@@ -220,6 +334,10 @@ def train_classic(
                 penalty_weight = config.signal_penalty_weight * ramp
                 signal_penalty = _export_signal_penalty(model, config.signal_penalty_threshold)
                 loss = loss + penalty_weight * signal_penalty
+            if config.weight_magnitude_penalty > 0:
+                loss = loss + config.weight_magnitude_penalty * _weight_magnitude_penalty(model)
+            if integer_weight > 0:
+                loss = loss + integer_weight * _integer_attraction_penalty(model)
 
             loss.backward()
             optimizer.step()
@@ -266,14 +384,39 @@ def train_classic(
             target_max=config.target_max,
             margin=config.margin,
         )
+        shifted_val_acc: float | None = None
+        if shifted_val_loader is not None:
+            _, shifted_val_acc = evaluate_model(
+                exportable_epoch,
+                shifted_val_loader,
+                device,
+                mode="exact",
+                loss_name=config.loss,
+                target_min=config.target_min,
+                target_max=config.target_max,
+                margin=config.margin,
+            )
+        epoch_score, epoch_physicality = selection_score(
+            exportable_val_acc,
+            shifted_val_acc,
+            exportable_epoch,
+            config,
+        )
 
         history_epoch.append(epoch)
         history_train_accuracy.append(train_acc)
         history_val_accuracy.append(val_acc)
         history_exportable_train_accuracy.append(exportable_train_acc)
         history_exportable_val_accuracy.append(exportable_val_acc)
+        history_shifted_val_accuracy.append(shifted_val_acc if shifted_val_acc is not None else exportable_val_acc)
+        history_selection_score.append(epoch_score)
+        history_active_weight_modules.append(int(epoch_physicality["active_weight_modules"]))
+        history_max_signal.append(int(epoch_physicality["max_signal"]))
+        history_surrogate_temperature.append(temperature if temperature is not None else 0.0)
+        history_integer_attraction_weight.append(integer_weight)
 
-        if exportable_val_acc > best_exportable_acc:
+        if epoch_score > best_selection_score:
+            best_selection_score = epoch_score
             best_exportable_acc = exportable_val_acc
             best_raw_acc = val_acc
             best_epoch = epoch
@@ -285,7 +428,8 @@ def train_classic(
         if epoch == 1 or epoch == config.ste_epochs or epoch % 10 == 0:
             print(
                 f"ste epoch={epoch:03d} train_acc={train_acc:.3f} raw_val={val_acc:.3f} "
-                f"exportable_val={exportable_val_acc:.3f} best_exportable={best_exportable_acc:.3f}"
+                f"exportable_val={exportable_val_acc:.3f} score={epoch_score:.3f} "
+                f"best_score={best_selection_score:.3f}"
             )
 
         if config.early_stop_patience > 0 and no_improve >= config.early_stop_patience:
@@ -293,6 +437,7 @@ def train_classic(
             break
 
     model.load_state_dict(best_state)
+    model.set_binary_surrogate_temperature_(None)
     for layer_index in config.identity_warmup_layer_indices:
         model.weights[layer_index].requires_grad_(True)
         model.biases[layer_index].requires_grad_(True)
@@ -300,12 +445,19 @@ def train_classic(
         "best_epoch": best_epoch,
         "best_val_accuracy": best_raw_acc,
         "best_exportable_val_accuracy": best_exportable_acc,
+        "best_selection_score": best_selection_score,
         "history": {
             "epoch": history_epoch,
             "train_accuracy": history_train_accuracy,
             "val_accuracy": history_val_accuracy,
             "exportable_train_accuracy": history_exportable_train_accuracy,
             "exportable_val_accuracy": history_exportable_val_accuracy,
+            "shifted_val_accuracy": history_shifted_val_accuracy,
+            "selection_score": history_selection_score,
+            "active_weight_modules": history_active_weight_modules,
+            "max_signal": history_max_signal,
+            "surrogate_temperature": history_surrogate_temperature,
+            "integer_attraction_weight": history_integer_attraction_weight,
         },
     }
 
@@ -422,12 +574,17 @@ def _score(model: MCNNModel, loader: DataLoader, device: torch.device, config: P
         target_max=config.target_max,
         margin=config.margin,
     )
-    overflow = max(0, model.max_bias_signal_strength() - MAX_SIGNAL_STRENGTH)
+    metrics = physicality_metrics(model, signal_target=config.signal_penalty_threshold)
+    overflow = max(0, int(metrics["max_signal"]) - MAX_SIGNAL_STRENGTH)
     score = (
         acc
         - config.hidden_unit_penalty * model.hidden_units()
         - config.nonzero_weight_penalty * model.nonzero_weights()
         - config.bias_signal_penalty * overflow / max(1, MAX_SIGNAL_STRENGTH)
+        - config.selection_signal_excess_weight * float(metrics["signal_excess"]) / max(1, MAX_SIGNAL_STRENGTH)
+        - config.selection_active_weight_weight
+        * float(metrics["active_weight_modules"])
+        / max(1.0, config.selection_active_weight_scale)
     )
     return score, loss, acc
 

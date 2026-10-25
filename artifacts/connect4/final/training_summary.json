@@ -1,0 +1,101 @@
+{
+  "config": {
+    "epochs": 20,
+    "batch_size": 256,
+    "learning_rate": 0.004,
+    "distillation_weight": 0.05,
+    "patience": 10,
+    "pattern_levels": 2,
+    "global_levels": 2,
+    "mixing_levels": 2,
+    "critical_sampling_weight": 3.0,
+    "opening_sampling_weight": 2.0,
+    "seed": 46031
+  },
+  "initial_model": "artifacts/connect4/experiments/physical_critical/model.pt",
+  "selected_epoch": 12,
+  "teacher_validation": {
+    "positions": 29473,
+    "optimal_move_rate": 0.8096223473548889,
+    "outcome_preservation_rate": 0.9395039677619934,
+    "mean_solver_regret": 0.7326706051826477,
+    "p95_solver_regret": 5.0,
+    "outcome_blunder_rate": 0.060496047139167786,
+    "opening_outcome_preservation": 0.8962075710296631,
+    "middle_outcome_preservation": 0.9384152889251709,
+    "late_outcome_preservation": 0.9749488830566406,
+    "optimal_outcome_preservation": 0.9647645950317383,
+    "noisy_outcome_preservation": 0.9134537577629089,
+    "random_outcome_preservation": 0.9383713603019714,
+    "anti_outcome_preservation": 0.9724721908569336,
+    "reflection_max_error": 0.0
+  },
+  "train": {
+    "positions": 120527,
+    "optimal_move_rate": 0.7815924882888794,
+    "outcome_preservation_rate": 0.91895592212677,
+    "mean_solver_regret": 0.9827590584754944,
+    "p95_solver_regret": 7.0,
+    "outcome_blunder_rate": 0.08104407787322998,
+    "opening_outcome_preservation": 0.8809554576873779,
+    "middle_outcome_preservation": 0.9087045788764954,
+    "late_outcome_preservation": 0.9638161659240723,
+    "optimal_outcome_preservation": 0.9387410879135132,
+    "noisy_outcome_preservation": 0.884789228439331,
+    "random_outcome_preservation": 0.9232929944992065,
+    "anti_outcome_preservation": 0.958378791809082,
+    "reflection_max_error": 0.0
+  },
+  "validation": {
+    "positions": 29473,
+    "optimal_move_rate": 0.7801377773284912,
+    "outcome_preservation_rate": 0.920707106590271,
+    "mean_solver_regret": 0.9576561450958252,
+    "p95_solver_regret": 6.0,
+    "outcome_blunder_rate": 0.0792929157614708,
+    "opening_outcome_preservation": 0.8755821585655212,
+    "middle_outcome_preservation": 0.9143697619438171,
+    "late_outcome_preservation": 0.968047022819519,
+    "optimal_outcome_preservation": 0.9301527738571167,
+    "noisy_outcome_preservation": 0.8950636982917786,
+    "random_outcome_preservation": 0.9184094071388245,
+    "anti_outcome_preservation": 0.9606934785842896,
+    "reflection_max_error": 0.0
+  },
+  "physicality": {
+    "connection_slots": 291328,
+    "active_connection_slots": 131250,
+    "active_fraction": 0.4505231217047452,
+    "fixed_tactical_patterns": 8,
+    "fixed_tactical_candidate_checks": 56,
+    "stream_windows": 69,
+    "windows_by_direction": [
+      24,
+      21,
+      12,
+      12
+    ],
+    "assumed_window_interval_redstone_ticks": 3,
+    "longest_convolution_lane_redstone_ticks": 72,
+    "longest_convolution_lane_seconds": 7.2,
+    "max_active_fan_in": {
+      "pattern": 8,
+      "global": 1548,
+      "mixing": 116,
+      "output": 33
+    },
+    "dense_fan_in": {
+      "pattern": 8,
+      "global": 2208,
+      "mixing": 128,
+      "output": 64
+    },
+    "naive_active_serial_comparator_depth": 1705,
+    "naive_active_serial_seconds_before_routing": 170.5,
+    "naive_dense_serial_comparator_depth": 2408,
+    "naive_dense_serial_seconds_before_routing": 240.8,
+    "end_to_end_latency": "unknown until a concrete schematic is audited",
+    "stored_output_heads": 4,
+    "logical_outputs": 7
+  }
+}

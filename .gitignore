@@ -2,3 +2,10 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# Local KataGo runtime dependencies. Keep tools/katago/go7x7.cfg in source.
+tools/katago-build/
+tools/katago/models/
+
+# Pascal Pons' external Connect Four solver and opening book.
+tools/connect4-solver/

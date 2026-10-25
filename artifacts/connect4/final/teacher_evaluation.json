@@ -1,0 +1,547 @@
+{
+  "model": "artifacts/connect4/experiments/teacher_150k/model.pt",
+  "dataset": {
+    "positions": 10000,
+    "optimal_move_rate": 0.8291000127792358,
+    "outcome_preservation_rate": 0.9541000127792358,
+    "mean_solver_regret": 0.6521000266075134,
+    "p95_solver_regret": 4.0,
+    "outcome_blunder_rate": 0.045899998396635056,
+    "opening_outcome_preservation": 0.9260838627815247,
+    "middle_outcome_preservation": 0.9461796283721924,
+    "late_outcome_preservation": 0.9829118251800537,
+    "optimal_outcome_preservation": 0.9828734397888184,
+    "noisy_outcome_preservation": 0.9295485615730286,
+    "random_outcome_preservation": 0.9624558091163635,
+    "anti_outcome_preservation": 0.9795563220977783,
+    "reflection_max_error": 0.0
+  },
+  "tactics": {
+    "immediate_win_positions": 2934,
+    "immediate_win_rate": 1.0,
+    "mandatory_block_positions": 1529,
+    "mandatory_block_rate": 1.0
+  },
+  "random_opponent": {
+    "games": 200,
+    "wins": 200,
+    "draws": 0,
+    "losses": 0,
+    "mean_result": 1.0
+  },
+  "latency": {
+    "batch_size": 1024,
+    "milliseconds_per_position": 0.02347773613280424,
+    "positions_per_second": 42593.54455401478
+  },
+  "perfect_reply": {
+    "games": 60,
+    "mean_result": -0.6833333333333333,
+    "wins": 9,
+    "draws": 1,
+    "losses": 50,
+    "model_move_optimal_rate": 0.7709163346613546,
+    "by_category": {
+      "winning": {
+        "games": 20,
+        "mean_result": -0.1,
+        "wins": 9,
+        "draws": 0
+      },
+      "drawing": {
+        "games": 20,
+        "mean_result": -0.95,
+        "wins": 0,
+        "draws": 1
+      },
+      "losing": {
+        "games": 20,
+        "mean_result": -1.0,
+        "wins": 0,
+        "draws": 0
+      }
+    },
+    "records": [
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 10,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 18,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 16,
+        "optimal_model_moves": 12
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "winning",
+        "initial_score": 11,
+        "initial_ply": 21,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -12,
+        "initial_ply": 17,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 5,
+        "initial_ply": 9,
+        "result": 1,
+        "model_moves": 15,
+        "optimal_model_moves": 14
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "winning",
+        "initial_score": 4,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 17,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "losing",
+        "initial_score": -11,
+        "initial_ply": 15,
+        "result": -1,
+        "model_moves": 3,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "winning",
+        "initial_score": 9,
+        "initial_ply": 18,
+        "result": 1,
+        "model_moves": 11,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "winning",
+        "initial_score": 18,
+        "initial_ply": 6,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 15,
+        "initial_ply": 13,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 17,
+        "optimal_model_moves": 16
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 9,
+        "result": 1,
+        "model_moves": 16,
+        "optimal_model_moves": 16
+      },
+      {
+        "category": "losing",
+        "initial_score": -5,
+        "initial_ply": 10,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 23,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -1,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 13,
+        "optimal_model_moves": 10
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 15,
+        "optimal_model_moves": 12
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "winning",
+        "initial_score": 3,
+        "initial_ply": 25,
+        "result": -1,
+        "model_moves": 3,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 15,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 21,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "winning",
+        "initial_score": 6,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 16,
+        "optimal_model_moves": 12
+      },
+      {
+        "category": "winning",
+        "initial_score": 1,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 14,
+        "result": -1,
+        "model_moves": 13,
+        "optimal_model_moves": 12
+      },
+      {
+        "category": "winning",
+        "initial_score": 13,
+        "initial_ply": 17,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 18,
+        "initial_ply": 7,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -14,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 4,
+        "initial_ply": 10,
+        "result": -1,
+        "model_moves": 15,
+        "optimal_model_moves": 13
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "winning",
+        "initial_score": 3,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 19,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 15,
+        "optimal_model_moves": 14
+      },
+      {
+        "category": "winning",
+        "initial_score": 10,
+        "initial_ply": 23,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "losing",
+        "initial_score": -5,
+        "initial_ply": 17,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -10,
+        "initial_ply": 19,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 13,
+        "optimal_model_moves": 9
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 9
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": 0,
+        "model_moves": 19,
+        "optimal_model_moves": 19
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 8,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 25,
+        "result": -1,
+        "model_moves": 8,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 14,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 10
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 16,
+        "optimal_model_moves": 15
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 14,
+        "result": -1,
+        "model_moves": 3,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 15,
+        "optimal_model_moves": 13
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 16,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 14,
+        "optimal_model_moves": 12
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-"""Regenerate model.schem from a saved MCNN model.pt artifact."""
+"""Export a saved dense MCNN artifact as a Minecraft schematic."""
 
 from __future__ import annotations
 
@@ -7,26 +7,34 @@ from pathlib import Path
 
 import torch
 
-from mcnn import model_from_artifact_state, save_schematic, validate_export_signals
+from mcnn import (
+    MCNNModel,
+    model_from_artifact_state,
+    save_schematic,
+    validate_export_signals,
+)
 
 
-DEFAULT_RUN_DIR = Path("artifacts/shift_digits_64_64_10")
-
-
-def load_model(path: Path):
+def load_model(path: Path) -> MCNNModel:
     artifact = torch.load(path, map_location="cpu")
-    return model_from_artifact_state(artifact["model"])
+    if not isinstance(artifact, dict):
+        raise ValueError("artifact must contain a dictionary")
+    state = artifact.get("model", artifact)
+    if not isinstance(state, dict) or "layers" not in state:
+        raise ValueError("artifact does not contain a dense MCNN model state")
+    return model_from_artifact_state(state)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
+    parser.add_argument("model", type=Path, help="Path to a dense MCNN .pt artifact")
+    parser.add_argument("--output", type=Path, help="Output .schem path")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    model_path = args.run_dir / "model.pt"
+    model_path = args.model
     if not model_path.exists():
         raise SystemExit(f"Model artifact not found: {model_path}")
 
@@ -38,7 +46,8 @@ def main() -> None:
             f"violations={signal_check['violations']} max_signal={signal_check['max_signal']}"
         )
 
-    saved = save_schematic(model, args.run_dir / "model")
+    output = args.output or model_path.with_suffix(".schem")
+    saved = save_schematic(model, output)
     print(f"saved schematic={saved}")
     print(
         "signal_check="

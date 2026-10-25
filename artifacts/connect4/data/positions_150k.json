@@ -1,0 +1,29 @@
+{
+  "config": {
+    "positions": 150000,
+    "seed": 44003,
+    "optimal_fraction": 0.1,
+    "noisy_fraction": 0.5,
+    "random_fraction": 0.25,
+    "anti_fraction": 0.15,
+    "noisy_random_probability": 0.4,
+    "temperature": 2.0
+  },
+  "positions": 150000,
+  "games": 8280,
+  "unique_positions": 150000,
+  "suboptimal_trajectory_moves": 119968,
+  "source_games": {
+    "optimal": 839,
+    "noisy": 4106,
+    "random": 2110,
+    "anti": 1225
+  },
+  "source_positions": {
+    "optimal": 19221,
+    "noisy": 59963,
+    "random": 33011,
+    "anti": 37805
+  },
+  "output": "artifacts/connect4/data/positions_150k.npz"
+}

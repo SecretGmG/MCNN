@@ -1,0 +1,120 @@
+{
+  "name": "connect4_98_16_64_32_7",
+  "input": {
+    "planes": 2,
+    "shape": [
+      2,
+      7,
+      7
+    ],
+    "semantics": [
+      "current_player",
+      "opponent"
+    ],
+    "zero_padding_row": 0
+  },
+  "architecture": [
+    98,
+    "16 shared length-4 filters over 69 windows",
+    64,
+    32,
+    "4 stored / 7 logical outputs"
+  ],
+  "symmetry": "exact horizontal reflection equivariance",
+  "output": "seven mechanically legal-masked column scores",
+  "training_data": {
+    "config": {
+      "positions": 150000,
+      "seed": 44003,
+      "optimal_fraction": 0.1,
+      "noisy_fraction": 0.5,
+      "random_fraction": 0.25,
+      "anti_fraction": 0.15,
+      "noisy_random_probability": 0.4,
+      "temperature": 2.0
+    },
+    "positions": 150000,
+    "games": 8280,
+    "unique_positions": 150000,
+    "suboptimal_trajectory_moves": 119968,
+    "source_games": {
+      "optimal": 839,
+      "noisy": 4106,
+      "random": 2110,
+      "anti": 1225
+    },
+    "source_positions": {
+      "optimal": 19221,
+      "noisy": 59963,
+      "random": 33011,
+      "anti": 37805
+    },
+    "output": "artifacts/connect4/data/positions_150k.npz"
+  },
+  "physical_training": {
+    "epochs": 20,
+    "batch_size": 256,
+    "learning_rate": 0.004,
+    "distillation_weight": 0.05,
+    "patience": 10,
+    "pattern_levels": 2,
+    "global_levels": 2,
+    "mixing_levels": 2,
+    "critical_sampling_weight": 3.0,
+    "opening_sampling_weight": 2.0,
+    "seed": 46031
+  },
+  "physicality": {
+    "connection_slots": 291328,
+    "active_connection_slots": 131250,
+    "active_fraction": 0.4505231217047452,
+    "fixed_tactical_patterns": 8,
+    "fixed_tactical_candidate_checks": 56,
+    "stream_windows": 69,
+    "windows_by_direction": [
+      24,
+      21,
+      12,
+      12
+    ],
+    "assumed_window_interval_redstone_ticks": 3,
+    "longest_convolution_lane_redstone_ticks": 72,
+    "longest_convolution_lane_seconds": 7.2,
+    "max_active_fan_in": {
+      "pattern": 8,
+      "global": 1548,
+      "mixing": 116,
+      "output": 33
+    },
+    "dense_fan_in": {
+      "pattern": 8,
+      "global": 2208,
+      "mixing": 128,
+      "output": 64
+    },
+    "naive_active_serial_comparator_depth": 1705,
+    "naive_active_serial_seconds_before_routing": 170.5,
+    "naive_dense_serial_comparator_depth": 2408,
+    "naive_dense_serial_seconds_before_routing": 240.8,
+    "end_to_end_latency": "unknown until a concrete schematic is audited",
+    "stored_output_heads": 4,
+    "logical_outputs": 7
+  },
+  "disjoint_test": {
+    "positions": 10000,
+    "optimal_move_rate": 0.7825999855995178,
+    "outcome_preservation_rate": 0.9215999841690063,
+    "mean_solver_regret": 1.0434000492095947,
+    "p95_solver_regret": 7.0,
+    "outcome_blunder_rate": 0.07840000092983246,
+    "opening_outcome_preservation": 0.8877043128013611,
+    "middle_outcome_preservation": 0.9085935950279236,
+    "late_outcome_preservation": 0.9630895256996155,
+    "optimal_outcome_preservation": 0.9448144435882568,
+    "noisy_outcome_preservation": 0.8905608654022217,
+    "random_outcome_preservation": 0.9324204921722412,
+    "anti_outcome_preservation": 0.9595476388931274,
+    "reflection_max_error": 0.0
+  },
+  "tie_break": "left-to-right fixed output arbitration"
+}

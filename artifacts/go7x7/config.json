@@ -1,0 +1,18 @@
+{
+  "hidden_sizes": [
+    128,
+    128,
+    128,
+    128
+  ],
+  "shift_depths": [
+    12,
+    4,
+    4,
+    4,
+    4
+  ],
+  "score_unit_points": 1.25,
+  "initial_weight_std": 0.8,
+  "surrogate_temperature": 2.0
+}

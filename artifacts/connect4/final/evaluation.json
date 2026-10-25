@@ -1,0 +1,583 @@
+{
+  "model": "artifacts/connect4/final/model.pt",
+  "dataset": {
+    "positions": 10000,
+    "optimal_move_rate": 0.7825999855995178,
+    "outcome_preservation_rate": 0.9215999841690063,
+    "mean_solver_regret": 1.0434000492095947,
+    "p95_solver_regret": 7.0,
+    "outcome_blunder_rate": 0.07840000092983246,
+    "opening_outcome_preservation": 0.8877043128013611,
+    "middle_outcome_preservation": 0.9085935950279236,
+    "late_outcome_preservation": 0.9630895256996155,
+    "optimal_outcome_preservation": 0.9448144435882568,
+    "noisy_outcome_preservation": 0.8905608654022217,
+    "random_outcome_preservation": 0.9324204921722412,
+    "anti_outcome_preservation": 0.9595476388931274,
+    "reflection_max_error": 0.0
+  },
+  "tactics": {
+    "immediate_win_positions": 2934,
+    "immediate_win_rate": 1.0,
+    "mandatory_block_positions": 1529,
+    "mandatory_block_rate": 1.0
+  },
+  "random_opponent": {
+    "games": 200,
+    "wins": 198,
+    "draws": 0,
+    "losses": 2,
+    "mean_result": 0.98
+  },
+  "latency": {
+    "batch_size": 1024,
+    "milliseconds_per_position": 0.023381225195606703,
+    "positions_per_second": 42769.35839050464
+  },
+  "perfect_reply": {
+    "games": 60,
+    "mean_result": -0.7333333333333333,
+    "wins": 8,
+    "draws": 0,
+    "losses": 52,
+    "model_move_optimal_rate": 0.6607142857142857,
+    "by_category": {
+      "winning": {
+        "games": 20,
+        "mean_result": -0.2,
+        "wins": 8,
+        "draws": 0
+      },
+      "drawing": {
+        "games": 20,
+        "mean_result": -1.0,
+        "wins": 0,
+        "draws": 0
+      },
+      "losing": {
+        "games": 20,
+        "mean_result": -1.0,
+        "wins": 0,
+        "draws": 0
+      }
+    },
+    "records": [
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 12,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "winning",
+        "initial_score": 5,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 17,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "winning",
+        "initial_score": 17,
+        "initial_ply": 9,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 4,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "winning",
+        "initial_score": 14,
+        "initial_ply": 15,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 14,
+        "initial_ply": 15,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 11
+      },
+      {
+        "category": "winning",
+        "initial_score": 8,
+        "initial_ply": 26,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 4,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 10,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "losing",
+        "initial_score": -11,
+        "initial_ply": 12,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -10,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 7,
+        "initial_ply": 26,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 8,
+        "initial_ply": 26,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "losing",
+        "initial_score": -2,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "winning",
+        "initial_score": 9,
+        "initial_ply": 25,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 0
+      },
+      {
+        "category": "losing",
+        "initial_score": -10,
+        "initial_ply": 21,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -10,
+        "initial_ply": 21,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 10,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 10,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "winning",
+        "initial_score": 3,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 14,
+        "optimal_model_moves": 10
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 8,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "winning",
+        "initial_score": 8,
+        "initial_ply": 26,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -13,
+        "initial_ply": 15,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -11,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 3,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "winning",
+        "initial_score": 16,
+        "initial_ply": 10,
+        "result": 1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 3,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 8,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "winning",
+        "initial_score": 2,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 5
+      },
+      {
+        "category": "losing",
+        "initial_score": -6,
+        "initial_ply": 12,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "winning",
+        "initial_score": 18,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "losing",
+        "initial_score": -3,
+        "initial_ply": 17,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -13,
+        "initial_ply": 15,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "losing",
+        "initial_score": -10,
+        "initial_ply": 8,
+        "result": -1,
+        "model_moves": 4,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "losing",
+        "initial_score": -6,
+        "initial_ply": 9,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "losing",
+        "initial_score": -11,
+        "initial_ply": 20,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -9,
+        "initial_ply": 23,
+        "result": -1,
+        "model_moves": 1,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "losing",
+        "initial_score": -4,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 5,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 12,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 7,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 9,
+        "optimal_model_moves": 4
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 12,
+        "optimal_model_moves": 8
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 0
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 3,
+        "optimal_model_moves": 2
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 4,
+        "result": -1,
+        "model_moves": 6,
+        "optimal_model_moves": 3
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 7,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 6,
+        "result": -1,
+        "model_moves": 8,
+        "optimal_model_moves": 6
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 11,
+        "optimal_model_moves": 7
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 12,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 0
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 5,
+        "result": -1,
+        "model_moves": 13,
+        "optimal_model_moves": 9
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 11,
+        "result": -1,
+        "model_moves": 2,
+        "optimal_model_moves": 1
+      },
+      {
+        "category": "drawing",
+        "initial_score": 0,
+        "initial_ply": 13,
+        "result": -1,
+        "model_moves": 13,
+        "optimal_model_moves": 12
+      }
+    ]
+  },
+  "physicality": {
+    "connection_slots": 291328,
+    "active_connection_slots": 131250,
+    "active_fraction": 0.4505231217047452,
+    "fixed_tactical_patterns": 8,
+    "fixed_tactical_candidate_checks": 56,
+    "stream_windows": 69,
+    "windows_by_direction": [
+      24,
+      21,
+      12,
+      12
+    ],
+    "assumed_window_interval_redstone_ticks": 3,
+    "longest_convolution_lane_redstone_ticks": 72,
+    "longest_convolution_lane_seconds": 7.2,
+    "max_active_fan_in": {
+      "pattern": 8,
+      "global": 1548,
+      "mixing": 116,
+      "output": 33
+    },
+    "dense_fan_in": {
+      "pattern": 8,
+      "global": 2208,
+      "mixing": 128,
+      "output": 64
+    },
+    "naive_active_serial_comparator_depth": 1705,
+    "naive_active_serial_seconds_before_routing": 170.5,
+    "naive_dense_serial_comparator_depth": 2408,
+    "naive_dense_serial_seconds_before_routing": 240.8,
+    "end_to_end_latency": "unknown until a concrete schematic is audited",
+    "stored_output_heads": 4,
+    "logical_outputs": 7
+  }
+}

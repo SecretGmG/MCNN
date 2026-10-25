@@ -1,0 +1,130 @@
+{
+  "training": {
+    "hidden_sizes": [
+      128,
+      128,
+      128,
+      128
+    ],
+    "shift_depths": [
+      12,
+      4,
+      4,
+      4,
+      4
+    ],
+    "relaxed_epochs": 8,
+    "exact_epochs": 16,
+    "learning_rate": 0.002,
+    "final_learning_rate": 0.0002,
+    "weight_decay": 1e-05,
+    "groups_per_batch": 16,
+    "absolute_weight": 0.5,
+    "centered_weight": 1.0,
+    "ranking_weight": 0.2,
+    "significant_gap": 3.0,
+    "quantization_weight": 0.02,
+    "score_unit_points": 1.25,
+    "split_seed": 8201,
+    "seed": 26003,
+    "patience": 18
+  },
+  "datasets": [
+    "artifacts/go7x7/data.npz"
+  ],
+  "examples": 28087,
+  "train_parents": 992,
+  "validation_parents": 249,
+  "selected_epoch": 22,
+  "train": {
+    "parents": 992.0,
+    "positional_rmse_points": 16.76053237915039,
+    "positional_mae_points": 11.486532211303711,
+    "centered_rmse_points": 6.420889854431152,
+    "mean_regret_points": 7.093786289194418,
+    "p90_regret_points": 23.54532356262207,
+    "over_10_points": 0.21169354838709678,
+    "significant_pair_accuracy": 0.7977384128924571
+  },
+  "validation": {
+    "parents": 249.0,
+    "positional_rmse_points": 14.57826042175293,
+    "positional_mae_points": 10.742756843566895,
+    "centered_rmse_points": 6.205483913421631,
+    "mean_regret_points": 6.822308842915608,
+    "p90_regret_points": 24.624190521240244,
+    "over_10_points": 0.18473895582329317,
+    "significant_pair_accuracy": 0.789174749727683
+  },
+  "physicality": {
+    "cell_size": 8,
+    "activation_steps": 15,
+    "accumulator_limit": 693,
+    "layers": [
+      {
+        "input_size": 104,
+        "output_size": 128,
+        "shift_depth": 12,
+        "connection_slots": 13312,
+        "active_connections": 7312,
+        "active_fraction": 0.5492788461538461,
+        "max_active_fan_in": 66,
+        "maximum_signal": 37,
+        "threshold_min": -6,
+        "threshold_max": 6
+      },
+      {
+        "input_size": 128,
+        "output_size": 128,
+        "shift_depth": 4,
+        "connection_slots": 5120,
+        "active_connections": 2832,
+        "active_fraction": 0.553125,
+        "max_active_fan_in": 29,
+        "maximum_signal": 285,
+        "threshold_min": -57,
+        "threshold_max": 57
+      },
+      {
+        "input_size": 128,
+        "output_size": 128,
+        "shift_depth": 4,
+        "connection_slots": 5120,
+        "active_connections": 2761,
+        "active_fraction": 0.5392578125,
+        "max_active_fan_in": 28,
+        "maximum_signal": 270,
+        "threshold_min": -58,
+        "threshold_max": 58
+      },
+      {
+        "input_size": 128,
+        "output_size": 128,
+        "shift_depth": 4,
+        "connection_slots": 5120,
+        "active_connections": 2743,
+        "active_fraction": 0.5357421875,
+        "max_active_fan_in": 31,
+        "maximum_signal": 270,
+        "threshold_min": -58,
+        "threshold_max": 57
+      },
+      {
+        "input_size": 128,
+        "output_size": 8,
+        "shift_depth": 4,
+        "connection_slots": 320,
+        "active_connections": 180,
+        "active_fraction": 0.5625,
+        "max_active_fan_in": 30,
+        "maximum_signal": 270,
+        "threshold_min": -58,
+        "threshold_max": 57
+      }
+    ],
+    "active_connections": 15828,
+    "connection_slots": 28992,
+    "maximum_signal": 285,
+    "within_accumulator_limit": true
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "config": {
+    "pattern_units": 16,
+    "global_units": 64,
+    "mixing_units": 32,
+    "epochs": 30,
+    "batch_size": 512,
+    "learning_rate": 0.0007,
+    "weight_decay": 1e-05,
+    "centered_weight": 0.15,
+    "target_temperature": 0.75,
+    "patience": 10,
+    "validation_fraction": 0.2,
+    "critical_sampling_weight": 3.0,
+    "opening_sampling_weight": 2.0,
+    "seed": 45031
+  },
+  "initial_model": "artifacts/connect4/experiments/teacher_medium_continued/model.pt",
+  "parameters": 73076,
+  "selected_epoch": 30,
+  "train": {
+    "positions": 120313,
+    "optimal_move_rate": 0.8339414596557617,
+    "outcome_preservation_rate": 0.9563471674919128,
+    "mean_solver_regret": 0.5830292701721191,
+    "p95_solver_regret": 4.0,
+    "outcome_blunder_rate": 0.04365280643105507,
+    "opening_outcome_preservation": 0.9223848581314087,
+    "middle_outcome_preservation": 0.9531814455986023,
+    "late_outcome_preservation": 0.9857431650161743,
+    "optimal_outcome_preservation": 0.9836969971656799,
+    "noisy_outcome_preservation": 0.9336421489715576,
+    "random_outcome_preservation": 0.9551757574081421,
+    "anti_outcome_preservation": 0.9793017506599426,
+    "reflection_max_error": 0.0
+  },
+  "validation": {
+    "positions": 29687,
+    "optimal_move_rate": 0.8253107666969299,
+    "outcome_preservation_rate": 0.9464749097824097,
+    "mean_solver_regret": 0.6389665603637695,
+    "p95_solver_regret": 4.0,
+    "outcome_blunder_rate": 0.05352511256933212,
+    "opening_outcome_preservation": 0.9142086505889893,
+    "middle_outcome_preservation": 0.9414379596710205,
+    "late_outcome_preservation": 0.9792274236679077,
+    "optimal_outcome_preservation": 0.9783073663711548,
+    "noisy_outcome_preservation": 0.9195249676704407,
+    "random_outcome_preservation": 0.9473850727081299,
+    "anti_outcome_preservation": 0.9731476902961731,
+    "reflection_max_error": 0.0
+  }
+}

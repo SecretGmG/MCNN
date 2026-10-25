@@ -1,0 +1,33 @@
+{
+  "config": {
+    "positions": 10000,
+    "seed": 44004,
+    "optimal_fraction": 0.1,
+    "noisy_fraction": 0.5,
+    "random_fraction": 0.25,
+    "anti_fraction": 0.15,
+    "noisy_random_probability": 0.4,
+    "temperature": 2.0
+  },
+  "positions": 10000,
+  "games": 607,
+  "unique_positions": 10000,
+  "excluded_positions_and_reflections": 288695,
+  "exclude_paths": [
+    "artifacts/connect4/data/positions_150k.npz"
+  ],
+  "suboptimal_trajectory_moves": 8751,
+  "source_games": {
+    "optimal": 55,
+    "noisy": 312,
+    "random": 161,
+    "anti": 79
+  },
+  "source_positions": {
+    "optimal": 1051,
+    "noisy": 4386,
+    "random": 2264,
+    "anti": 2299
+  },
+  "output": "artifacts/connect4/data/positions_test_disjoint_10k.npz"
+}
