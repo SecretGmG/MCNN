@@ -14,9 +14,10 @@ ties.
 
 Every layer is the physical streamed Minecraft layer described in
 [`minecraft_network.md`](minecraft_network.md): eight-neuron cells, cyclic
-one-sided block bands, ternary weights, and exactly 15 threshold-count steps.
-The retained model uses shift depths `12, 4, 4, 4, 4`; its first layer is dense
-over the padded input and later layers use five adjacent wrapped cells.
+one-directional diagonal strips, ternary weights, and exactly 15 threshold-count
+steps. The retained model uses shift depths `12, 4, 4, 4, 4`; its first layer
+uses all 104 input diagonals and later layers use the first 40 diagonals in the
+physical shifter traversal. The unshifted diagonal is last in that traversal.
 
 The dataset target excludes accumulated prisoner totals. Immediate captures are
 added mechanically at inference, so the network learns positional value rather
@@ -32,12 +33,20 @@ The complete retained run is under `artifacts/go7x7/`:
 - `training.json` and `history.json`: metrics and training history
 - `training.png`: concise optimization plot
 
-The short cleanup run used 28,087 examples and selected epoch 22. On its
-game-disjoint validation split it reached 6.82 points mean move regret, 6.21
-points centered RMSE, and 78.9% ordering accuracy for move pairs separated by
-at least three points. Train and validation mean regret were 7.09 and 6.82
+The short cleanup run used 28,087 examples and selected epoch 18. On its
+game-disjoint validation split it reached 6.97 points mean move regret, 6.21
+points centered RMSE, and 79.2% ordering accuracy for move pairs separated by
+at least three points. Train and validation mean regret were 6.84 and 6.97
 points respectively, providing no sign of conventional train-set overfitting
 in this run. This is a validated physical baseline, not yet a strong Go player.
+
+For the retained shift depths `12, 4, 4, 4, 4`, the diagonal widths are
+`104, 40, 40, 40, 40`. The timing formula in `minecraft_network.md` gives a
+first-result latency of 2,744 RT (`274.4 s`) with preloaded inputs and direct
+final-output reads. Evaluating all 49 placements plus pass as one 50-position
+stream adds only 98 RT (`9.8 s`), so the final result arrives after `284.2 s`.
+The corresponding steady-state scoring throughput is five positions per
+second; running 50 independent end-to-end passes would be much slower.
 
 ## Commands
 

@@ -94,6 +94,9 @@ class MinecraftGoModel(nn.Module):
     def physicality(self) -> dict[str, object]:
         return self.network.physicality()
 
+    def timing(self, *, batch_size: int = 1) -> dict[str, object]:
+        return self.network.timing(batch_size=batch_size)
+
     def save(self, path: str | Path) -> None:
         torch.save(
             {
@@ -112,5 +115,10 @@ class MinecraftGoModel(nn.Module):
         if artifact.get("model_type") != cls.model_type:
             raise ValueError(f"unsupported model type: {artifact.get('model_type')!r}")
         model = cls(MinecraftGoConfig.from_dict(artifact["config"]))
-        model.load_state_dict(artifact["state_dict"])
+        state = {
+            name: value
+            for name, value in artifact["state_dict"].items()
+            if not name.endswith("connection_mask")
+        }
+        model.load_state_dict(state)
         return model

@@ -8,18 +8,27 @@ from mcnn.minecraft_network import (
     MinecraftLayer,
     MinecraftLayerConfig,
     cyclic_cell_mask,
+    cyclic_diagonal_mask,
+    cyclic_diagonal_order,
 )
 
 
-def test_cyclic_cell_mask_wraps_downward() -> None:
+def test_cyclic_diagonal_order_starts_four_down_and_ends_on_diagonal() -> None:
+    assert cyclic_diagonal_order(8) == (4, 1, 5, 2, 6, 3, 7, 0)
+    order = cyclic_diagonal_order(24)
+    assert order[:5] == (4, 8, 12, 16, 20)
+    assert order[-1] == 0
+    assert sorted(order) == list(range(24))
+
+
+def test_cyclic_cell_mask_uses_the_physical_diagonal_strip() -> None:
     mask = cyclic_cell_mask(24, 24, shift_depth=1)
     assert mask.shape == (24, 24)
-    # Output cell zero receives input cells zero and two through wraparound.
-    assert mask[0, :8].all()
-    assert not mask[0, 8:16].any()
-    assert mask[0, 16:24].all()
-    # Every output neuron sees two complete cells.
+    # A value first reaches the neuron four rows down; the diagonal is last.
+    assert mask[4, 0]
+    assert not mask[0, 0]
     assert torch.equal(mask.sum(1), torch.full((24,), 16))
+    assert cyclic_diagonal_mask(24, 24, 24).all()
 
 
 def test_exact_layer_uses_ternary_weights_and_threshold_count() -> None:
@@ -83,3 +92,16 @@ def test_pass_wins_an_exact_model_tie() -> None:
         for parameter in model.parameters():
             parameter.zero_()
     assert select_successor_move(model, GoPosition()) == 49
+
+
+def test_network_timing_separates_latency_from_stream_throughput() -> None:
+    model = MinecraftGoModel(
+        MinecraftGoConfig(hidden_sizes=(16, 16), shift_depths=(1, 1, 1))
+    )
+    timing = model.timing(batch_size=4)
+    # Three layers, each processing two connected cells: 3 * (128 + 120),
+    # with two eight-tick inter-layer handoffs.
+    assert timing["first_result_redstone_ticks"] == 760
+    assert timing["batch_tail_redstone_ticks"] == 6
+    assert timing["last_result_redstone_ticks"] == 766
+    assert timing["steady_state_evaluations_per_second"] == 5

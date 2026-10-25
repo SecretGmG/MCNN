@@ -57,24 +57,115 @@ activation is simply `count(s_j > t[r])`.
 ## Layers and connectivity
 
 Outputs are stored in barrels. A downward barrel shifter, with wraparound,
-streams them back as inputs to the next layer. A complete rotation implements
-a dense layer. Stopping after `k` shifts implements a cyclic block-banded layer
-without changing the compute cell.
-
-If cells are indexed modulo the number of input cells, output cell `j` receives
-from the `k + 1` consecutive cells
+streams them back as inputs to the next layer. Number the logical values from
+top to bottom and then by their four temporal slots. Moving down one two-block
+slice changes the logical destination by four. For an input width `n`, the
+shifter visits matrix diagonals in this exact order:
 
 ```text
-j, j - 1, ..., j - k    (modulo the input cell count).
+4, 8, 12, ..., n - 4,
+1, 5,  9, ..., n - 3,
+2, 6, 10, ..., n - 2,
+3, 7, 11, ..., n - 1,
+0
 ```
 
-Thus each output neuron has at most `8(k + 1)` inputs. Because the shifter wraps,
-there are no boundary cells; the physical downward direction is simply a
-choice of cyclic ordering in software. A full dense layer is obtained by
-shifting through every input cell.
+For diagonal `d`, input value `i` is connected to output neuron
+`(i + d) mod n`. The first reachable weight is therefore four rows below the
+matrix diagonal, in the next two-block slice. The unshifted diagonal `d = 0` is
+the final destination, not the first.
+
+The uppermost and lowermost neuron pairs use the orange-supported endpoint
+routes when the stream wraps. The orange blocks are structural and add no
+redstone delay themselves. Each endpoint route contains the same three delayed
+comparator stages as the ordinary route. At the wrap it advances the temporal
+phase, producing the `... n - 4, 1 ...`, `... n - 3, 2 ...` transitions above
+without a bubble in the two-RT stream.
+
+Stopping the shifter early retains a prefix of this cyclic-diagonal order. The
+current Python configuration is aligned to eight-neuron modules: a
+`shift_depth` of `k` retains
+
+```text
+w = 8 * (k + 1)
+```
+
+diagonals. A full dense layer is obtained when `w = n`. The wrap means there
+are no exceptional boundary neurons, but a truncated layer must use the
+physical order above rather than an ordinary centered or block-contiguous band.
 
 A fixed tower of compute cells can execute networks of arbitrary depth by
 repeating accumulation, 15-cycle activation, output storage, and barrel
 shifting for each layer. The network architecture is therefore specified by
 the padded layer sizes, the shift count of each layer, the ternary weight ROM,
 and the activation-subtraction ROM.
+
+## Exact timing
+
+One redstone tick (RT) is two game ticks, or `0.1 s`. The timing below was
+audited against `nn(2).schem` (SHA-256
+`a5b5fabf65f0540846fcabdc9c3928e91b98fb7c64f00d37618d565a6084843c`).
+It assumes the Java redstone delays represented by the schematic block states.
+
+The barrel shifter has a three-RT longest data path. This includes the three
+comparator stages on the orange-supported endpoint route; those stages balance
+the corresponding ordinary route. Its four temporal slots remain two RT apart,
+so the slots of one cell reach the destination at:
+
+```text
+slot 0    slot 1    slot 2    slot 3
+  3 RT      5 RT      7 RT      9 RT
+```
+
+The fourth slot is visible at absolute time `t = 9 RT` because the whole stream
+has a fixed three-RT pipeline latency. The handoff itself nevertheless occupies
+exactly eight RT (`0.8 s`), measured from the start of one four-slot cell to the
+start of the next. The two height lanes run in parallel. Two four-RT repeaters
+in the control path produce this eight-RT transfer window. The shifter's slot
+initiation interval remains two RT (`0.2 s`).
+
+For layer `l`, define:
+
+```text
+n[l] = padded input width
+m[l] = padded output width
+k[l] = configured shift depth
+w[l] = 8 * (k[l] + 1) = retained physical diagonals
+```
+
+The tower contains `m[l] / 8` parallel eight-neuron modules, so output width
+changes area and ROM width, not layer latency. Each retained diagonal contributes
+eight ternary weights to one output module. A hex word carries two weights, so
+one diagonal consumes four words. At two RT per word:
+
+```text
+accumulation[l] = 4 * w[l] words * 2 RT = 8 * w[l] RT
+activation[l]   = 8 neurons * 15 steps / 2 values-per-word * 2 RT
+                = 120 RT
+handoff         = 8 RT between consecutive layers
+```
+
+For a `D`-layer network whose inputs are already loaded and whose final outputs
+are read in place, first-result latency is:
+
+```text
+L_first = 8 * sum(w[l]) + 120 * D + 8 * (D - 1) RT
+T_first = 0.1 * L_first seconds
+```
+
+Add eight RT if inputs must first pass through the shifter, and another eight RT
+if final outputs must be handed off instead of read in place. For a dense
+layer, `w[l] = n[l]`. For a truncated layer, latency depends only on the number
+of retained physical diagonals.
+
+The long first-result latency must not be confused with stream throughput.
+After the pipeline is filled, independent examples are separated by two RT.
+For a batch of `P` boards evaluated with the same ROM schedule:
+
+```text
+L_last(P) = L_first + 2 * (P - 1) RT
+throughput = 1 / 0.2 s = 5 evaluations per second
+```
+
+The Python model exposes the same calculation as
+`MinecraftNetwork.timing(batch_size=...)`.

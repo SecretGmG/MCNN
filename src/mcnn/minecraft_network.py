@@ -12,12 +12,16 @@ from torch import Tensor, nn
 CELL_SIZE = 8
 ACTIVATION_STEPS = 15
 ACCUMULATOR_LIMIT = 693
+REDSTONE_TICK_SECONDS = 0.1
+STREAM_INTERVAL_REDSTONE_TICKS = 2
+SHIFTER_FIRST_SLOT_REDSTONE_TICKS = 3
+SHIFTER_CELL_REDSTONE_TICKS = 8
 ForwardMode = Literal["exact", "ste", "relaxed"]
 
 
 @dataclass(frozen=True)
 class MinecraftLayerConfig:
-    """One cyclic block-banded layer of eight-neuron cells."""
+    """One module-aligned cyclic-diagonal layer of eight-neuron cells."""
 
     output_size: int
     shift_depth: int
@@ -64,18 +68,50 @@ class MinecraftNetworkConfig:
         return cls(**data)  # type: ignore[arg-type]
 
 
-def cyclic_cell_mask(input_size: int, output_size: int, shift_depth: int) -> Tensor:
-    """Return the exact modular downward-shift connectivity mask."""
+def cyclic_diagonal_order(input_size: int) -> tuple[int, ...]:
+    """Return the physical downward-shifter diagonal order.
+
+    A four-value temporal slice moves to the next two-block slice first. At
+    each end, the delay-balanced wrap advances to the next temporal phase.
+    The unshifted diagonal is therefore reached last.
+    """
+    if input_size <= 0 or input_size % CELL_SIZE:
+        raise ValueError("input_size must be a positive multiple of eight")
+    slice_count = input_size // 4
+    order = [4 * step for step in range(1, slice_count)]
+    for phase in range(1, 4):
+        order.extend(phase + 4 * step for step in range(slice_count))
+    order.append(0)
+    if len(order) != input_size or len(set(order)) != input_size:
+        raise RuntimeError("invalid physical diagonal traversal")
+    return tuple(order)
+
+
+def cyclic_diagonal_mask(
+    input_size: int, output_size: int, diagonal_width: int
+) -> Tensor:
+    """Return the first ``diagonal_width`` physical cyclic diagonals."""
     if input_size % CELL_SIZE or output_size % CELL_SIZE:
         raise ValueError("layer sizes must be multiples of eight")
-    input_cells = input_size // CELL_SIZE
-    if shift_depth >= input_cells:
-        raise ValueError("shift_depth must be smaller than the input cell count")
+    if not 1 <= diagonal_width <= input_size:
+        raise ValueError("diagonal_width must be in [1, input_size]")
 
-    input_cell = torch.arange(input_size) // CELL_SIZE
-    output_cell = torch.arange(output_size) // CELL_SIZE
-    distance = (output_cell[:, None] - input_cell[None, :]) % input_cells
-    return distance <= shift_depth
+    selected = torch.tensor(cyclic_diagonal_order(input_size)[:diagonal_width])
+    input_index = torch.arange(input_size)
+    output_index = torch.arange(output_size)[:, None] % input_size
+    distance = (output_index - input_index[None, :]) % input_size
+    return (distance[..., None] == selected).any(-1)
+
+
+def cyclic_cell_mask(input_size: int, output_size: int, shift_depth: int) -> Tensor:
+    """Return the module-aligned physical diagonal strip.
+
+    ``shift_depth`` retains the architecture's eight-neuron module unit. Each
+    included module contributes eight consecutive diagonals in the physical
+    traversal order.
+    """
+    diagonal_width = CELL_SIZE * (shift_depth + 1)
+    return cyclic_diagonal_mask(input_size, output_size, min(input_size, diagonal_width))
 
 
 def _ste(hard: Tensor, soft: Tensor) -> Tensor:
@@ -103,6 +139,7 @@ class MinecraftLayer(nn.Module):
         self.input_size = input_size
         self.output_size = config.output_size
         self.shift_depth = config.shift_depth
+        self.diagonal_width = CELL_SIZE * (config.shift_depth + 1)
         self.surrogate_temperature = float(surrogate_temperature)
         self.quantization_progress = 1.0
         self.weight = nn.Parameter(
@@ -112,6 +149,7 @@ class MinecraftLayer(nn.Module):
         self.register_buffer(
             "connection_mask",
             cyclic_cell_mask(input_size, config.output_size, config.shift_depth),
+            persistent=False,
         )
         self.reset_thresholds(input_max)
 
@@ -171,6 +209,7 @@ class MinecraftLayer(nn.Module):
             "input_size": self.input_size,
             "output_size": self.output_size,
             "shift_depth": self.shift_depth,
+            "diagonal_width": self.diagonal_width,
             "connection_slots": int(self.connection_mask.sum().item()),
             "active_connections": int(active.sum().item()),
             "active_fraction": float(active.sum().item() / self.connection_mask.sum().item()),
@@ -236,4 +275,64 @@ class MinecraftNetwork(nn.Module):
             "within_accumulator_limit": all(
                 int(row["maximum_signal"]) <= self.config.accumulator_limit for row in rows
             ),
+        }
+
+    def timing(
+        self,
+        *,
+        batch_size: int = 1,
+        include_input_handoff: bool = False,
+        include_output_handoff: bool = False,
+    ) -> dict[str, object]:
+        """Return exact scheduled timing for the streamed physical network.
+
+        Inputs are assumed to be preloaded and final outputs read in place by
+        default. Handoffs between layers are mandatory. Additional examples
+        follow the first one at the two-redstone-tick stream interval.
+        """
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        layers: list[dict[str, int]] = []
+        first_result = SHIFTER_CELL_REDSTONE_TICKS if include_input_handoff else 0
+        last_layer = len(self.layers) - 1
+        for index, layer in enumerate(self.layers):
+            connected_cells = layer.shift_depth + 1
+            diagonal_width = layer.diagonal_width
+            weight_words = 4 * diagonal_width
+            accumulation = STREAM_INTERVAL_REDSTONE_TICKS * weight_words
+            activation_words = 4 * ACTIVATION_STEPS
+            activation = STREAM_INTERVAL_REDSTONE_TICKS * activation_words
+            handoff = (
+                SHIFTER_CELL_REDSTONE_TICKS
+                if index < last_layer or include_output_handoff
+                else 0
+            )
+            layer_total = accumulation + activation + handoff
+            first_result += layer_total
+            layers.append(
+                {
+                    "connected_cells": connected_cells,
+                    "diagonal_width": diagonal_width,
+                    "weight_words": weight_words,
+                    "accumulation_redstone_ticks": accumulation,
+                    "activation_words": activation_words,
+                    "activation_redstone_ticks": activation,
+                    "handoff_redstone_ticks": handoff,
+                    "total_redstone_ticks": layer_total,
+                }
+            )
+        batch_tail = STREAM_INTERVAL_REDSTONE_TICKS * (batch_size - 1)
+        last_result = first_result + batch_tail
+        return {
+            "redstone_tick_seconds": REDSTONE_TICK_SECONDS,
+            "stream_interval_redstone_ticks": STREAM_INTERVAL_REDSTONE_TICKS,
+            "steady_state_evaluations_per_second": 1
+            / (STREAM_INTERVAL_REDSTONE_TICKS * REDSTONE_TICK_SECONDS),
+            "batch_size": batch_size,
+            "layers": layers,
+            "first_result_redstone_ticks": first_result,
+            "first_result_seconds": first_result * REDSTONE_TICK_SECONDS,
+            "batch_tail_redstone_ticks": batch_tail,
+            "last_result_redstone_ticks": last_result,
+            "last_result_seconds": last_result * REDSTONE_TICK_SECONDS,
         }
